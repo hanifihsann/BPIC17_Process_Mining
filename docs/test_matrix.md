@@ -11,8 +11,9 @@ Status hanya ditulis `PASS` atau `FAIL` berdasarkan eksekusi pengujian yang bena
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | TM-01 | Import & Overview (Anggota 1) | Load dan validasi `EventLog` / `DataFrame` serta hitung overview (`validate_log`, `get_case_trace`, `calculate_overview`) pada fixture sintetis | Validasi atribut wajib/opsional, overview count, cycle time, dan preservation urutan asli sesuai unit test | 23/23 unit test pada `tests/test_data_loader.py` (14) & `tests/test_overview.py` (9) lulus | PASS | Anggota 1 | Diverifikasi via `python -m unittest discover -s tests -v` |
 | TM-02 | Import & Overview (Anggota 1) | Load file XES BPIC17 asli melalui `load_xes` dan `ImportOverviewPage` | File XES asli terbaca tanpa crash, metadata & overview tampil | Belum dijalankan (file XES BPIC17 asli tidak tersedia di workspace) | NOT TESTED | Anggota 1 & 4 | Wajib diverifikasi saat file XES BPIC17 tersedia |
-| TM-03 | Exercise 11.7 (Anggota 2) | Pengujian aturan filter & metrik Exercise 11.7 pada fixture sintetis dan dataset BPIC17 | Hasil hitung dan case terpilih sesuai definisi Exercise 11.7 | Modul Exercise 11.7 belum tersedia pada branch ini | NOT TESTED | Anggota 2 | Menunggu PR/merge modul Anggota 2 |
-| TM-04 | Exercise 11.7 (Anggota 2) | Klik baris hasil Exercise 11.7 untuk membuka evidence di Case Explorer | Case Explorer menampilkan trace lengkap beserta highlight evidence 11.7 | Belum terintegrasi karena modul 11.7 belum tersedia | NOT TESTED | Anggota 2 & 4 | Dapat memakai `CaseExplorerPage.open_case(case_id, evidence)` (API marker generik sudah lulus di TM-20) |
+| TM-03 | Exercise 11.7 (Anggota 2) | Pengujian aturan filter & metrik Exercise 11.7 A–E pada fixture sintetis dan DataFrame | 11.7 A (count), 11.7 B (mean duration hari), 11.7 C (contains O_Accepted), 11.7 D (contains O_Refused), overlap C-D, 11.7 E (endpoint O_Cancelled) akurat | 11/11 unit test pada `tests/test_exercise_117.py` lulus (A, B, C, D, E, overlap, endpoint, zero-div safe, EventLog & DataFrame equivalence) | PASS | Anggota 2 | Fixture sintetis |
+| TM-04 | Exercise 11.7 (Anggota 2) | Klik baris hasil Exercise 11.7 untuk membuka evidence di Case Explorer | Case Explorer menampilkan trace lengkap beserta highlight evidence 11.7 (label & posisi O_Accepted, O_Refused, O_Cancelled) | Terintegrasi via `open_case_requested` -> `CaseExplorerPage.open_case(case_id, evidence)`. Diverifikasi pada smoke test GUI offscreen | PASS | Anggota 2 & 4 | Lulus di `test_exercise_117_page_and_case_explorer_flow` |
+| TM-04B | Ekspor CSV (Anggota 2) | Ekspor ringkasan jawaban 11.7 A–E dan daftar case terpilih ke file CSV | File CSV berformat UTF-8 BOM, memuat header, denominator, persentase, mean cycle time, serta bukti trace | Lulus di `test_export_summary_and_cases_csv` dan `test_export_page_integration` | PASS | Anggota 2 | Teruji fungsional & GUI |
 | TM-05 | Exercise 11.15 (Anggota 2) | Pengujian aturan filter & metrik Exercise 11.15 pada fixture sintetis dan dataset BPIC17 | Hasil hitung dan case terpilih sesuai definisi Exercise 11.15 | Modul Exercise 11.15 belum tersedia pada branch ini | NOT TESTED | Anggota 2 | Menunggu PR/merge modul Anggota 2 |
 | TM-06 | Exercise 11.15 (Anggota 2) | Klik baris hasil Exercise 11.15 untuk membuka evidence di Case Explorer | Case Explorer menampilkan trace lengkap beserta highlight evidence 11.15 | Belum terintegrasi karena modul 11.15 belum tersedia | NOT TESTED | Anggota 2 & 4 | Dapat memakai `CaseExplorerPage.open_case(case_id, evidence)` |
 | TM-07 | Exercise 11.18 (Anggota 3) | Pengujian aturan filter & metrik Exercise 11.18 pada fixture sintetis dan dataset BPIC17 | Hasil hitung dan case terpilih sesuai definisi Exercise 11.18 | Modul Exercise 11.18 belum tersedia pada branch ini | NOT TESTED | Anggota 3 | Menunggu PR/merge modul Anggota 3 |
@@ -40,9 +41,11 @@ Status hanya ditulis `PASS` atau `FAIL` berdasarkan eksekusi pengujian yang bena
 
 ## B. Ringkasan Eksekusi Terakhir
 - **Perintah:** `QT_QPA_PLATFORM=offscreen python -m unittest discover -s tests -v`
-- **Waktu / Hasil:** `Ran 42 tests in 0.286s — OK`
+- **Waktu / Hasil:** `Ran 66 tests in 10.296s — OK`
   - `tests/test_data_loader.py`: 14 PASS
   - `tests/test_overview.py`: 9 PASS
+  - `tests/test_exercise_117.py`: 13 PASS (11 logika analisis & ekspor CSV + 2 smoke test GUI offscreen & integrasi Case Explorer)
   - `tests/test_exercise_1122.py`: 12 PASS
   - `tests/test_case_explorer.py`: 7 PASS (termasuk 1 smoke test integrasi GUI PySide6 offscreen)
-- **Belum Diuji (`NOT TESTED`):** Modul Anggota 2 (`11.7`, `11.15`), modul Anggota 3 (`11.18`), integrasi main window Anggota 5, serta eksekusi terhadap file XES BPIC17 asli.
+  - `tests/test_integration.py`: 11 PASS (shell main window & worker)
+- **Belum Diuji (`NOT TESTED`):** Modul Anggota 3 (`11.15`, `11.18`), serta eksekusi terhadap file XES BPIC17 asli (menunggu dataset asli diimpor di komputer dosen/presentasi).
