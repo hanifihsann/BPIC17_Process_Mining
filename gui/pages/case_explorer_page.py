@@ -108,7 +108,7 @@ class CaseExplorerPage(QWidget):
         root = QVBoxLayout(self)
 
         # Search & control bar
-        search_box = QGroupBox("Case Explorer — Pencarian & Inspeksi Trace Asli")
+        search_box = QGroupBox("Case Explorer — Pencarian && Inspeksi Trace Asli")
         search_layout = QVBoxLayout(search_box)
 
         controls_row = QHBoxLayout()
@@ -164,8 +164,8 @@ class CaseExplorerPage(QWidget):
         trace_layout.addWidget(self.event_table)
         splitter.addWidget(trace_box)
 
-        splitter.setStretchFactor(0, 2)
-        splitter.setStretchFactor(1, 3)
+        splitter.setStretchFactor(0, 1)
+        splitter.setStretchFactor(1, 2)
         root.addWidget(splitter, 1)
 
     @staticmethod
@@ -482,6 +482,9 @@ class CaseExplorerPage(QWidget):
             item = self.case_table.item(row_idx, 0)
             if item is not None and item.text() == target:
                 self.case_table.selectRow(row_idx)
+                self.case_table.scrollToItem(
+                    item, QAbstractItemView.ScrollHint.PositionAtCenter
+                )
                 return
 
     def _render_trace(self, detail: dict[str, Any]) -> None:
@@ -492,12 +495,15 @@ class CaseExplorerPage(QWidget):
         bold_font.setBold(True)
         bg_brush = QBrush(self._EVIDENCE_BG)
         fg_brush = QBrush(self._EVIDENCE_FG)
+        first_evidence_row: int | None = None
 
         for row_idx, event in enumerate(events):
             lifecycle = event.get("lifecycle")
             resource = event.get("resource")
             is_evidence = bool(event.get("is_evidence", False))
             evidence_role = event.get("evidence_role")
+            if is_evidence and first_evidence_row is None:
+                first_evidence_row = row_idx
 
             evidence_text = f"Evidence ({evidence_role})" if is_evidence else "-"
             values = (
@@ -517,6 +523,13 @@ class CaseExplorerPage(QWidget):
                     item.setForeground(fg_brush)
                     item.setFont(bold_font)
                 self.event_table.setItem(row_idx, col_idx, item)
+
+        if first_evidence_row is not None:
+            first_item = self.event_table.item(first_evidence_row, 0)
+            if first_item is not None:
+                self.event_table.scrollToItem(
+                    first_item, QAbstractItemView.ScrollHint.PositionAtCenter
+                )
 
     @Slot(int, int)
     def _on_case_row_clicked(self, row: int, _col: int) -> None:

@@ -83,36 +83,51 @@ Di dalam `install_anggota4_pages(window)`:
 
 ---
 
-## 6. Status Entry Point `main.py` & Cara Menjalankan Aplikasi / Demo
+## 6. Status Entry Point `main.py` & Dataset BPIC17 Asli
 
-- **Status `main.py`:** `main.py` sekarang memanggil `install_anggota4_pages(window)` tepat setelah `window = MainWindow()`, sehingga menjalankan `python main.py` langsung menampilkan halaman **Exercise 11.22** dan **Case Explorer** menggantikan placeholder.
+- **Status `main.py`:** `main.py` memanggil `setup_feature_pages(window)` yang memasang halaman Anggota 2 (`Exercise117Page`, `ExportPage`) sekaligus halaman Anggota 4 melalui `install_anggota4_pages(window)`. Menjalankan `python main.py` langsung menampilkan halaman **Exercise 11.22** dan **Case Explorer** menggantikan placeholder.
 - **Menjalankan aplikasi desktop utama:**
   ```powershell
   python main.py
   ```
-- **Dataset BPIC17 Asli (Cara Memperoleh):**
-  File BPIC17 `.xes` asli belum tersedia di workspace/mesin uji. Sumber resmi: **BPI Challenge 2017** (Boudewijn van Dongen, 2017, 4TU.ResearchData, DOI `10.4121/uuid:5f3067df-f10b-45da-b98b-86ae4c7a310b`). Unduh arsip `BPI Challenge 2017.xes.gz`, ekstrak file `.xes` ke folder `data/` (atau lokasi lokal di luar repo), lalu pilih melalui **Import Dataset -> Pilih file XES**.
+- **Dataset BPIC17 Asli:**
+  - Sumber resmi: **BPI Challenge 2017** (Boudewijn van Dongen, 2017, 4TU.ResearchData, DOI `10.4121/uuid:5f3067df-f10b-45da-b98b-86ae4c7a310b`).
+  - Lokasi lokal (tidak ikut ter-commit karena folder `data/` di `.gitignore`): `data/BPI Challenge 2017.xes` (552,12 MB, diekstrak dari `BPI Challenge 2017.xes.gz` 28,28 MB).
 
 ---
 
 ## 7. Hasil Pengujian yang Benar-Benar Dijalankan
 
-Pengujian dijalankan pada Python 3.11.0 dengan `pm4py==2.7.23.13`, `PySide6==6.12.0`, dan `pandas==3.0.5` menggunakan mode Qt offscreen setelah sinkronisasi dengan `origin/main` (termasuk modul Anggota 1, 2, 4, dan 5):
-
+### 7.1 Unit & Integration Test Otomatis
+Dijalankan pada Python 3.11.0 dengan `pm4py==2.7.23.13`, `PySide6==6.12.0`, dan `pandas==3.0.5`:
 - **Perintah:** `$env:QT_QPA_PLATFORM="offscreen"; python -m unittest discover -s tests -v`
 - **Hasil:** **67 test dijalankan — 67 PASS, 0 FAIL, 0 ERROR** (`7.139s`):
   - `tests/test_exercise_1122.py` (Anggota 4): **12 PASS**
-  - `tests/test_case_explorer.py` (Anggota 4): **8 PASS** (6 `CaseExplorerTests`, 1 `GuiWidgetsOffscreenSmokeTests`, 1 `MainWindowAnggota4IntegrationTests` termasuk uji error `TaskThread` & `ImportOverviewPage` dengan fixture `.xes`)
+  - `tests/test_case_explorer.py` (Anggota 4): **8 PASS** (6 `CaseExplorerTests`, 1 `GuiWidgetsOffscreenSmokeTests`, 1 `MainWindowAnggota4IntegrationTests`)
   - `tests/test_data_loader.py` & `tests/test_overview.py` (Anggota 1): **23 PASS** (14 + 9)
   - `tests/test_exercise_117.py` (Anggota 2): **13 PASS**
-  - `tests/test_integration.py` (Anggota 5): **11 PASS** (termasuk `test_main_entry_point` setelah integrasi `main.py`)
-- **Verifikasi `python main.py` terintegrasi:** Diverifikasi membuka `MainWindow` dengan `Exercise1122Page` dan `CaseExplorerPage` terpasang (`EX_MOUNTED: True`, `CE_MOUNTED: True`), mengimpor fixture XES sintetis, menjalankan 11.22 (`1/2 = 50.00%`), dan membuka `App_1001` di Case Explorer.
+  - `tests/test_integration.py` (Anggota 5): **11 PASS**
+
+### 7.2 Hasil Verifikasi End-to-End Dataset BPIC17 Asli (`MainWindow` Interaktif)
+- **File uji:** `data/BPI Challenge 2017.xes`
+- **Impor XES + Overview + Build CaseIndex:** `66.88s` (`31.509` active cases, `1.202.267` events).
+- **Exercise 11.22 (`analyze_1122` via `TaskThread`):**
+  - Waktu eksekusi: `4.392s` (re-run `4.568s` tanpa membaca ulang XES)
+  - Total active cases (denominator): `31.509`
+  - Case lolos (`O_Cancelled` posisi `i` diikuti `O_Accepted` posisi `j`, `i < j`): `902`
+  - Persentase: `2.86%` (`2.862674%`)
+  - Contoh bukti awal:
+    - `Application_428409768`: `O_Cancelled` (urutan `#19`, `2016-01-02 11:26:06.088000+00:00`) -> `O_Accepted` (urutan `#43`, `2016-01-14 07:00:14.440000+00:00`), total `45` event.
+    - `Application_1059184025`: `O_Cancelled` (`#9`) -> `O_Accepted` (`#39`), total `41` event.
+- **Case Explorer & Pencarian:**
+  - Double-click `Application_428409768` otomatis membuka Case Explorer dengan `45` event asli lengkap dan sorotan pada urutan `#19` & `#43`.
+  - Pencarian `Application_1059184025` selesai dalam `0.1466s` (`41` event).
+- **Screenshot bukti:** `docs/screenshots/exercise_1122_bpic17.png` dan `docs/screenshots/case_explorer_bpic17.png`.
 
 ---
 
-## 8. Keterbatasan Integrasi & Kebutuhan Tes XES BPIC17 Asli
+## 8. Catatan Integrasi & Status Proyek
 
-1. **Review Perubahan `main.py`:** `main.py` mendapat penambahan minimal 2 baris (`from gui.pages import install_anggota4_pages` dan `install_anggota4_pages(window)`) untuk memasang halaman Anggota 4; perlu ditinjau Anggota 5 saat PR/merge.
-2. **Modul Anggota 2 & 3:** Halaman `exercise_117`, `exercise_115_118`, dan `export` masih berstatus placeholder di `MainWindow`.
-3. **Dataset XES BPIC17 Asli:** File XES BPIC17 asli belum tersedia di workspace sehingga hasil hitung pada data asli dan performa skala penuh (~31.509 cases / >1,2 juta events) belum diverifikasi (`NOT TESTED`).
-4. **Catatan Lingkungan:** `requirements.txt` mencantumkan `PySide6==6.11.3` dan `pandas==2.3.3` serta `README.md` mengacu Python 3.13, sedangkan lingkungan uji memakai Python 3.11.0 dengan `PySide6==6.12.0`, `pm4py==2.7.23.13`, dan `pandas==3.0.5`.
+1. **Sinkronisasi `origin/main`:** Branch `feature/fazl-finalisasi-anggota4` sudah digabung dengan `origin/main` (termasuk PR #4 Anggota 2) sehingga kompatibel penuh dengan `Exercise117Page`, `ExportPage`, dan `setup_feature_pages(window)` di `main.py`.
+2. **Modul Anggota 3:** Halaman `exercise_115_118` masih berstatus placeholder di `MainWindow` hingga PR Anggota 3 digabungkan.
+3. **Catatan Lingkungan:** `requirements.txt` mencantumkan `PySide6==6.11.3` dan `pandas==2.3.3` serta `README.md` mengacu Python 3.13, sedangkan lingkungan uji memakai Python 3.11.0 dengan `PySide6==6.12.0`, `pm4py==2.7.23.13`, dan `pandas==3.0.5`.

@@ -207,6 +207,7 @@ class Exercise1122Page(QWidget):
         table.setHorizontalScrollMode(QAbstractItemView.ScrollPerPixel)
         table.setAlternatingRowColors(True)
         table.setSortingEnabled(False)
+        table.horizontalHeader().setMinimumSectionSize(75)
         table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
         table.horizontalHeader().setStretchLastSection(True)
         table.verticalHeader().setVisible(False)
