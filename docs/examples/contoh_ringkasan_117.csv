@@ -1,0 +1,6 @@
+﻿Kode,Subsoal,Pertanyaan,Aturan / Filter,Jumlah Case Terpilih,Total Case Aktif (Denominator),Persentase (%),Rata-rata Cycle Time (Hari)
+11.7 A,11.7 A,Berapa jumlah keseluruhan case?,Hitung unique case/trace dari keseluruhan log aktif,7,7,100.0,-
+11.7 B,11.7 B,Berapa rata-rata cycle time seluruh case?,Durasi tiap case = waktu event terakhir − event pertama pada trace asli,7,7,100.0,3.2857
+11.7 C,11.7 C,Berapa successful cases dan rata-rata cycle time-nya?,Case memuat setidaknya satu event O_Accepted (contains rule),3,7,42.86%,3.0000
+11.7 D,11.7 D,Berapa unsuccessful cases dan rata-rata cycle time-nya?,Case memuat setidaknya satu event O_Refused (contains rule),2,7,28.57%,2.0000
+11.7 E,11.7 E,Berapa canceled cases dan rata-rata cycle time-nya?,Event TERAKHIR pada trace adalah O_Cancelled (endpoint rule),1,7,14.29%,6.0000
