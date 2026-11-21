@@ -332,5 +332,164 @@ class GuiWidgetsOffscreenSmokeTests(unittest.TestCase):
         self.assertEqual(ex_page.current_state, "error")
 
 
+class MainWindowAnggota4IntegrationTests(unittest.TestCase):
+    """End-to-end tests of Anggota 4 pages mounted into Anggota 5's MainWindow."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        from PySide6.QtWidgets import QApplication
+
+        cls.app = QApplication.instance() or QApplication([])
+        cls.app.setQuitOnLastWindowClosed(False)
+
+    def _wait_until(self, predicate, timeout_ms: int = 10000) -> bool:
+        import time
+
+        elapsed = 0
+        step = 10
+        while elapsed < timeout_ms:
+            self.app.processEvents()
+            if predicate():
+                return True
+            time.sleep(step / 1000.0)
+            elapsed += step
+        self.app.processEvents()
+        return bool(predicate())
+
+    def test_mainwindow_navigation_1122_case_explorer_search_reset_rerun(self):
+        import tempfile
+        from pathlib import Path
+        from PySide6.QtCore import Qt
+        from PySide6.QtTest import QTest
+        from gui.main_window import MainWindow
+        from gui.pages import install_anggota4_pages
+
+        window = MainWindow()
+        ex_page, ce_page = install_anggota4_pages(window)
+        self.addCleanup(lambda: (ex_page.close(), ce_page.close(), window.close()))
+
+        self.assertEqual(ex_page.current_state, "no_dataset")
+        self.assertEqual(ce_page.current_state, "no_dataset")
+        self.assertFalse(ex_page.task_controls.run_button.isEnabled())
+
+        # Create a real temporary XES file and load it via Anggota 1's ImportOverviewPage
+        with tempfile.TemporaryDirectory() as tmpdir:
+            xes_path = Path(tmpdir) / "bpic17_synthetic.xes"
+            xes_path.write_text(
+                '<log xes.version="1.0" xmlns="http://www.xes-standard.org/">'
+                '<trace><string key="concept:name" value="App_Pass"/>'
+                '<event><string key="concept:name" value="A_Create Application"/>'
+                '<date key="time:timestamp" value="2026-01-01T09:00:00.000+00:00"/>'
+                '<string key="lifecycle:transition" value="complete"/>'
+                '<string key="org:resource" value="User_1"/></event>'
+                '<event><string key="concept:name" value="O_Cancelled"/>'
+                '<date key="time:timestamp" value="2026-01-01T09:10:00.000+00:00"/>'
+                '<string key="lifecycle:transition" value="complete"/>'
+                '<string key="org:resource" value="User_2"/></event>'
+                '<event><string key="concept:name" value="W_Validate"/>'
+                '<date key="time:timestamp" value="2026-01-01T09:20:00.000+00:00"/></event>'
+                '<event><string key="concept:name" value="O_Accepted"/>'
+                '<date key="time:timestamp" value="2026-01-01T09:30:00.000+00:00"/>'
+                '<string key="lifecycle:transition" value="complete"/></event>'
+                '</trace>'
+                '<trace><string key="concept:name" value="App_Fail_Order"/>'
+                '<event><string key="concept:name" value="O_Accepted"/>'
+                '<date key="time:timestamp" value="2026-01-01T10:00:00.000+00:00"/></event>'
+                '<event><string key="concept:name" value="O_Cancelled"/>'
+                '<date key="time:timestamp" value="2026-01-01T10:05:00.000+00:00"/></event>'
+                '</trace>'
+                '<trace><string key="concept:name" value="App_Other"/>'
+                '<event><string key="concept:name" value="A_Submitted"/>'
+                '<date key="time:timestamp" value="2026-01-01T11:00:00.000+00:00"/></event>'
+                '</trace>'
+                '</log>',
+                encoding="utf-8",
+            )
+            window.import_page.load_file(str(xes_path))
+            self.assertTrue(
+                self._wait_until(
+                    lambda: window.state.dataset is not None and not window.busy and not ce_page.is_indexing()
+                )
+            )
+
+        self.assertIs(window.state.dataset.log, window.import_page.active_log)
+        self.assertEqual(ex_page.current_state, "ready")
+        self.assertEqual(ce_page.current_state, "ready")
+        self.assertTrue(ex_page.task_controls.run_button.isEnabled())
+
+        # Navigate to Exercise 11.22 and run via Anggota 5's TaskControls + TaskThread
+        window.navigate("exercise_1122")
+        self.assertIs(window.stack.currentWidget(), ex_page)
+        QTest.mouseClick(ex_page.task_controls.run_button, Qt.MouseButton.LeftButton)
+        self.assertTrue(
+            self._wait_until(lambda: not window.busy and window.state.has_result("exercise_1122"))
+        )
+
+        self.assertEqual(ex_page.current_state, "loaded")
+        self.assertEqual(ex_page.count_label.text(), "1")
+        self.assertEqual(ex_page.denominator_label.text(), "3")
+        self.assertEqual(ex_page.percentage_label.text(), "33.33%")
+        self.assertEqual(ex_page.result_table.rowCount(), 1)
+        self.assertEqual(ex_page.result_table.item(0, 0).text(), "App_Pass")
+
+        # Double-click result row -> navigates to Case Explorer and highlights evidence
+        ex_page.result_table.selectRow(0)
+        ex_page._on_row_double_clicked(0, 0)
+        self.app.processEvents()
+
+        self.assertIs(window.stack.currentWidget(), ce_page)
+        self.assertEqual(window.page_title.text(), "Case Explorer")
+        self.assertEqual(ce_page.current_case_id, "App_Pass")
+        self.assertEqual(ce_page.event_table.rowCount(), 4)
+        self.assertIn("O_Cancelled", ce_page.event_table.item(1, 5).text())
+        self.assertIn("O_Accepted", ce_page.event_table.item(3, 5).text())
+        self.assertEqual(ce_page.event_table.item(2, 3).text(), "-")
+        self.assertEqual(ce_page.event_table.item(2, 4).text(), "-")
+
+        # Search Case ID in Case Explorer + Reset
+        ce_page.search_input.setText("App_Fail_Order")
+        ce_page.apply_search()
+        self.assertEqual(ce_page.current_case_id, "App_Fail_Order")
+        self.assertEqual(ce_page.event_table.rowCount(), 2)
+
+        ce_page.search_input.setText("TIDAK_ADA")
+        ce_page.apply_search()
+        self.assertEqual(ce_page.current_state, "empty")
+
+        ce_page.reset_view()
+        self.assertEqual(ce_page.current_state, "ready")
+        self.assertEqual(ce_page.case_table.rowCount(), 3)
+
+        # Navigate back to Exercise 11.22 -> Reset & Re-run via MainWindow TaskControls
+        window.navigate("exercise_1122")
+        QTest.mouseClick(ex_page.task_controls.reset_button, Qt.MouseButton.LeftButton)
+        self.app.processEvents()
+        self.assertFalse(window.state.has_result("exercise_1122"))
+        self.assertEqual(ex_page.result_table.rowCount(), 0)
+        self.assertTrue(ex_page.task_controls.rerun_button.isEnabled())
+
+        QTest.mouseClick(ex_page.task_controls.rerun_button, Qt.MouseButton.LeftButton)
+        self.assertTrue(
+            self._wait_until(lambda: not window.busy and window.state.has_result("exercise_1122"))
+        )
+        self.assertEqual(ex_page.count_label.text(), "1")
+        self.assertEqual(ex_page.denominator_label.text(), "3")
+        self.assertEqual(ex_page.result_table.rowCount(), 1)
+
+        # Error handling inside MainWindow TaskThread updates page state to error
+        from gui.app_state import ActiveDataset
+
+        bad_df = pd.DataFrame({"wrong_col": [1]})
+        window.state.activate(ActiveDataset(bad_df, {"file_name": "bad.xes", "case_count": 1, "event_count": 1}, {}))
+        with self.assertLogs("gui.workers", level="ERROR"):
+            QTest.mouseClick(ex_page.task_controls.run_button, Qt.MouseButton.LeftButton)
+            self.assertTrue(
+                self._wait_until(lambda: not window.busy and ex_page.current_state == "error")
+            )
+        self.assertEqual(ex_page.current_state, "error")
+        self.assertIn("Analisis gagal", ex_page.status_label.text())
+
+
 if __name__ == "__main__":
     unittest.main()

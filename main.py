@@ -7,6 +7,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication
 
 from gui.main_window import MainWindow
+from gui.pages import install_anggota4_pages
 from gui.styles import STYLESHEET
 
 
@@ -18,6 +19,7 @@ def main() -> int:
     app.setStyle("Fusion")
     app.setStyleSheet(STYLESHEET)
     window = MainWindow()
+    install_anggota4_pages(window)
     window.show()
     return app.exec()
 

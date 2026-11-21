@@ -6,14 +6,14 @@
 | --- | --- | --- |
 | `modules/exercise_1122.py` | Logika analisis Exercise 11.22 pada level case | `analyze_1122`, `RULE_DESCRIPTION` |
 | `modules/case_explorer.py` | Inspeksi trace case lengkap, pencarian, indexing cache, dan penanda evidence | `get_case_trace`, `get_case_detail`, `list_cases`, `search_cases`, `build_case_index`, `CaseIndex`, `clear_case_index_cache` |
-| `gui/pages/__init__.py` | Paket halaman reusable GUI desktop | Ekspor `Exercise1122Page`, `CaseExplorerPage` |
-| `gui/pages/exercise_1122_page.py` | Widget `QWidget` halaman Exercise 11.22 (non-blocking `QThread`) | `Exercise1122Page`, `Exercise1122Worker` |
-| `gui/pages/case_explorer_page.py` | Widget `QWidget` halaman Case Explorer (non-blocking indexing `QThread`) | `CaseExplorerPage`, `CaseIndexWorker` |
+| `gui/pages/__init__.py` | Paket halaman reusable GUI desktop & helper pemasangan `MainWindow` | `Exercise1122Page`, `CaseExplorerPage`, `install_anggota4_pages` |
+| `gui/pages/exercise_1122_page.py` | Widget `QWidget` halaman Exercise 11.22 (mendukung `MainWindow` `TaskControls`/`TaskThread` & standalone `QThread`) | `Exercise1122Page`, `Exercise1122Worker` |
+| `gui/pages/case_explorer_page.py` | Widget `QWidget` halaman Case Explorer (mendukung `AppState.dataset_changed` & background indexing `QThread`) | `CaseExplorerPage`, `CaseIndexWorker` |
 | `tests/test_exercise_1122.py` | Unit test Exercise 11.22 untuk `EventLog` & `DataFrame` | `Exercise1122Tests` |
-| `tests/test_case_explorer.py` | Unit test Case Explorer + smoke test widget GUI offscreen | `CaseExplorerTests`, `GuiWidgetsOffscreenSmokeTests` |
+| `tests/test_case_explorer.py` | Unit test Case Explorer, smoke test standalone, & uji integrasi `MainWindow` end-to-end | `CaseExplorerTests`, `GuiWidgetsOffscreenSmokeTests`, `MainWindowAnggota4IntegrationTests` |
 | `docs/test_matrix.md` | Matriks uji gabungan lintas fitur (11.7, 11.15, 11.18, 11.22, integrasi) | Tabel skenario, expected/actual, status |
 | `docs/anggota4.md` | Dokumentasi teknis, kontrak API, panduan integrasi & demo | Dokumen ini |
-| `docs/script_demo_anggota4.md` | Naskah narasi dan langkah layar video demo (1,5–2 menit) | Panduan demo |
+| `docs/script_demo_anggota4.md` | Naskah narasi dan langkah operasional perekaman video demo (1,5–2 menit) | Panduan demo |
 
 ---
 
@@ -27,181 +27,91 @@
   - Atribut/kolom wajib kosong atau hilang pada dataset non-kosong -> `ValueError`
   - Dataset kosong (`EventLog([])` atau `DataFrame` 0 baris) -> aman, mengembalikan `count=0`, `total_cases=0`, `percentage=0.0`.
 - **Output (`dict[str, Any]`):**
-  ```python
-  {
-      "exercise": "11.22",
-      "rule": "O_Cancelled pada posisi i diikuti O_Accepted pada posisi j dengan i < j (analisis level case, urutan event asli dipertahankan)",
-      "cancelled_activity": "O_Cancelled",
-      "accepted_activity": "O_Accepted",
-      "count": int,          # jumlah case unik yang lolos
-      "total_cases": int,    # total active cases (denominator)
-      "percentage": float,   # (count / total_cases * 100.0) atau 0.0 jika total_cases == 0
-      "case_ids": list[Any], # daftar Case ID yang lolos
-      "evidence": [          # satu entri per case lolos
-          {
-              "case_id": Any,
-              "cancelled_index": int,       # posisi 0-based i
-              "accepted_index": int,        # posisi 0-based j (i < j)
-              "cancelled_seq": int,         # urutan 1-based (i + 1)
-              "accepted_seq": int,          # urutan 1-based (j + 1)
-              "cancelled_activity": str,
-              "accepted_activity": str,
-              "cancelled_timestamp": Any,
-              "accepted_timestamp": Any,
-              "cancelled_event": dict,
-              "accepted_event": dict,
-              "evidence_positions": [int, int],
-              "trace_length": int,
-          }
-      ],
-  }
-  ```
+  - `exercise`: `"11.22"`
+  - `rule`: deskripsi aturan `i < j`
+  - `count`: jumlah case unik yang lolos
+  - `total_cases`: total active cases (denominator)
+  - `percentage`: `(count / total_cases * 100.0)` atau `0.0` jika `total_cases == 0`
+  - `case_ids`: daftar `Case ID` yang lolos
+  - `evidence`: daftar dict (1 entri per case lolos) berisi `case_id`, `cancelled_index`, `accepted_index`, `cancelled_seq`, `accepted_seq`, `cancelled_activity`, `accepted_activity`, `cancelled_timestamp`, `accepted_timestamp`, `cancelled_event`, `accepted_event`, `evidence_positions`, `trace_length`.
 
 ### 2.2 `get_case_trace(log_or_df, case_id, *, evidence=None, highlight_positions=None, index=None)`
 - **Input:** `log_or_df` (`EventLog` / `DataFrame` PM4Py), `case_id`, dan penanda evidence opsional (`evidence` dict hasil 11.22, dict `{posisi: label}` untuk latihan 11.7/11.15/11.18, atau iterable posisi `highlight_positions`).
-- **Output (`list[dict[str, Any]]`):** Seluruh event asli dari case secara berurutan (mengembalikan `[]` jika `case_id` tidak ditemukan). Setiap elemen berisi:
-  ```python
-  {
-      "seq": int,                 # nomor urut 1-based
-      "position": int,            # indeks 0-based
-      "case_id": Any,
-      "timestamp": Any,
-      "activity": Any,
-      "lifecycle": Any | None,    # None jika tidak tersedia (tidak dibuat-buat)
-      "resource": Any | None,     # None jika tidak tersedia (tidak dibuat-buat)
-      "is_evidence": bool,
-      "evidence_role": str | None,
-  }
-  ```
-- **Fungsi Pendukung Case Explorer:**
-  - `build_case_index(log_or_df)` / `get_or_build_case_index(log_or_df)`: membangun indeks lookup cepat `O(1)` per case dengan weakref-managed cache dan pengecekan signature agar tidak melakukan full scan berulang kali.
-  - `list_cases(log_or_df, *, index=None)` & `search_cases(log_or_df, query="", *, index=None)`: daftar dan pencarian Case ID substring (case-insensitive).
-  - `get_case_detail(log_or_df, case_id, *, evidence=None, highlight_positions=None, index=None)`: ringkasan case + trace lengkap dalam satu dictionary.
+- **Output (`list[dict[str, Any]]`):** Seluruh event asli dari case secara berurutan (mengembalikan `[]` jika `case_id` tidak ditemukan), berisi `seq`, `position`, `case_id`, `timestamp`, `activity`, `lifecycle` (`None` jika kosong), `resource` (`None` jika kosong), `is_evidence`, dan `evidence_role`.
+- **Fungsi Pendukung Case Explorer:** `build_case_index`, `get_or_build_case_index`, `list_cases`, `search_cases`, `get_case_detail`, `clear_case_index_cache`.
 
 ---
 
 ## 3. Aturan Filter `i < j` dan Perhitungan Persentase
 
-1. **Level Case (bukan Offer ID):** Setiap trace/case dievaluasi satu kali berdasarkan urutan event aslinya. Atribut Offer ID tidak memecah case.
+1. **Level Case (bukan Offer ID):** Setiap trace/case dievaluasi satu kali berdasarkan urutan event aslinya.
 2. **Urutan Event Asli & Stabil:** Event tidak diurutkan ulang berdasarkan timestamp; jika terdapat timestamp identik, urutan asli trace tetap dipertahankan.
-3. **Kondisi `i < j`:**
-   - Dicari kemunculan pertama `O_Cancelled` pada indeks `i`.
-   - Kemudian dicari `O_Accepted` pada indeks `j` dengan `i < j`. Aktivitas lain di antara `i` dan `j` diperbolehkan (tidak harus bersebelahan).
-   - Jika `O_Accepted` hanya muncul sebelum `O_Cancelled` tanpa ada `O_Accepted` setelahnya, case **tidak lolos**.
-   - Jika terdapat beberapa pasangan `(i, j)` valid dalam satu case, case tetap dihitung **1 kali** (`count` menghitung case, bukan jumlah pasangan event).
-4. **Persentase:**
-   - `percentage = (count / total_cases) * 100.0` saat `total_cases > 0`.
-   - `percentage = 0.0` saat `total_cases == 0` (aman dari `ZeroDivisionError`).
+3. **Kondisi `i < j`:** Mencari kemunculan pertama `O_Cancelled` pada indeks `i` yang diikuti `O_Accepted` pada indeks `j` dengan `i < j` (aktivitas perantara diperbolehkan). `O_Accepted` yang hanya muncul sebelum `O_Cancelled` tidak lolos. Beberapa pasangan valid dalam 1 case tetap dihitung 1 case.
+4. **Persentase:** `count / total_cases * 100.0` saat `total_cases > 0`, dan `0.0` saat `total_cases == 0`.
 
 ---
 
 ## 4. Cara Menjalankan Unit Test
 
-```bash
-python -m unittest discover -s tests -v
+```powershell
+$env:QT_QPA_PLATFORM="offscreen"; python -m unittest discover -s tests -v
 ```
 
-Untuk menjalankan modul Anggota 4 saja:
-```bash
-python -m unittest tests.test_exercise_1122 tests.test_case_explorer -v
+Untuk modul Anggota 4 saja:
+```powershell
+$env:QT_QPA_PLATFORM="offscreen"; python -m unittest discover -s tests -p "test_exercise_1122.py" -v
+$env:QT_QPA_PLATFORM="offscreen"; python -m unittest discover -s tests -p "test_case_explorer.py" -v
 ```
 
 ---
 
-## 5. Cara Integrasi ke GUI Anggota 5 & Log Anggota 1
+## 5. Cara Integrasi ke GUI Utama Anggota 5 (`MainWindow`)
 
-Kedua halaman (`Exercise1122Page` dan `CaseExplorerPage`) adalah `QWidget` reusable dan **tidak** membuat `QMainWindow` atau `QApplication` sendiri. Contoh wiring pada main window Anggota 5:
+Shell `gui/main_window.py` menyediakan `MainWindow.install_page(page_key, panel, controls=None)` untuk key `"exercise_1122"` dan `"case_explorer"`. Paket Anggota 4 sudah menyediakan fungsi `install_anggota4_pages(window)` pada `gui/pages/__init__.py`:
 
 ```python
-from gui.import_overview_page import ImportOverviewPage
-from gui.pages.exercise_1122_page import Exercise1122Page
-from gui.pages.case_explorer_page import CaseExplorerPage
+from gui.pages import install_anggota4_pages
 
-import_page = ImportOverviewPage()
-ex1122_page = Exercise1122Page()
-case_explorer_page = CaseExplorerPage()
-
-# 1. Sambungkan dataset aktif dari Anggota 1 (tanpa membaca XES ulang)
-import_page.dataset_loaded.connect(ex1122_page.set_dataset)
-import_page.dataset_loaded.connect(case_explorer_page.set_dataset)
-
-# 2. Sambungkan klik dua kali / buka evidence dari 11.22 ke Case Explorer
-def on_open_case_from_1122(case_id, evidence):
-    case_explorer_page.open_case(case_id, evidence)
-    main_stack_or_tabs.setCurrentWidget(case_explorer_page)
-
-ex1122_page.open_case_requested.connect(on_open_case_from_1122)
-
-# 3. Halaman anggota lain (11.7, 11.15, 11.18) dapat memanggil pola yang sama:
-# case_explorer_page.open_case(case_id, {"evidence_positions": [pos1, pos2], "label": "11.15"})
+window = MainWindow()
+install_anggota4_pages(window)
 ```
+
+Di dalam `install_anggota4_pages(window)`:
+1. `Exercise1122Page.bind_main_window(window)` mengaktifkan `TaskControls` (`Jalankan Analisis`, `Reset hasil`, `Jalankan ulang`), menghubungkan `controls.run_requested` ke `window.run_task("exercise_1122", ..., lambda ds: analyze_1122(ds.log))`, serta berlangganan `window.state.dataset_changed` dan `window.state.result_changed`.
+2. `CaseExplorerPage.bind_main_window(window)` berlangganan `window.state.dataset_changed` untuk membangun `CaseIndex` dari `dataset.log` yang sama tanpa membaca ulang XES.
+3. Sinyal `ex1122_page.open_case_requested` dihubungkan ke `case_explorer_page.open_case(case_id, evidence)` diikuti `window.navigate("case_explorer")`.
 
 ---
 
-## 6. Cara Menjalankan Demo dengan Fixture Sintetis (Tanpa Aplikasi Final Terpisah)
+## 6. Status Entry Point `main.py` & Cara Menjalankan Aplikasi / Demo
 
-Sambil menunggu main window Anggota 5, halaman widget dapat dipreview secara langsung menggunakan skrip sekali jalan (`python -c ...`) dengan `QTabWidget` sementara dan fixture sintetis:
-
-```bash
-python -c "
-from datetime import datetime, timezone
-from pm4py.objects.log.obj import Event, EventLog, Trace
-from PySide6.QtWidgets import QApplication, QTabWidget
-from gui.pages.exercise_1122_page import Exercise1122Page
-from gui.pages.case_explorer_page import CaseExplorerPage
-
-t0 = datetime(2026, 1, 1, 9, 0, tzinfo=timezone.utc)
-t1 = datetime(2026, 1, 1, 9, 15, tzinfo=timezone.utc)
-t2 = datetime(2026, 1, 1, 9, 30, tzinfo=timezone.utc)
-log = EventLog([
-    Trace([
-        Event({'concept:name': 'A_Create Application', 'time:timestamp': t0, 'lifecycle:transition': 'complete', 'org:resource': 'User_1'}),
-        Event({'concept:name': 'O_Cancelled', 'time:timestamp': t1, 'lifecycle:transition': 'complete', 'org:resource': 'User_2'}),
-        Event({'concept:name': 'O_Accepted', 'time:timestamp': t2, 'lifecycle:transition': 'complete', 'org:resource': 'User_3'}),
-    ], attributes={'concept:name': 'Demo_Case_1'}),
-    Trace([
-        Event({'concept:name': 'O_Accepted', 'time:timestamp': t0}),
-        Event({'concept:name': 'O_Cancelled', 'time:timestamp': t1}),
-    ], attributes={'concept:name': 'Demo_Case_2'}),
-])
-
-app = QApplication([])
-tabs = QTabWidget()
-ex_page = Exercise1122Page()
-ce_page = CaseExplorerPage()
-tabs.addTab(ex_page, 'Exercise 11.22')
-tabs.addTab(ce_page, 'Case Explorer')
-
-ex_page.open_case_requested.connect(lambda cid, ev: (ce_page.open_case(cid, ev), tabs.setCurrentWidget(ce_page)))
-ex_page.set_dataset(log, {'file_name': 'synthetic_demo.xes', 'case_count': len(log)})
-ce_page.set_dataset(log, {'file_name': 'synthetic_demo.xes', 'case_count': len(log)})
-
-tabs.resize(960, 600)
-tabs.show()
-app.exec()
-"
-```
+- **Status `main.py`:** `main.py` sekarang memanggil `install_anggota4_pages(window)` tepat setelah `window = MainWindow()`, sehingga menjalankan `python main.py` langsung menampilkan halaman **Exercise 11.22** dan **Case Explorer** menggantikan placeholder.
+- **Menjalankan aplikasi desktop utama:**
+  ```powershell
+  python main.py
+  ```
+- **Dataset BPIC17 Asli (Cara Memperoleh):**
+  File BPIC17 `.xes` asli belum tersedia di workspace/mesin uji. Sumber resmi: **BPI Challenge 2017** (Boudewijn van Dongen, 2017, 4TU.ResearchData, DOI `10.4121/uuid:5f3067df-f10b-45da-b98b-86ae4c7a310b`). Unduh arsip `BPI Challenge 2017.xes.gz`, ekstrak file `.xes` ke folder `data/` (atau lokasi lokal di luar repo), lalu pilih melalui **Import Dataset -> Pilih file XES**.
 
 ---
 
 ## 7. Hasil Pengujian yang Benar-Benar Dijalankan
 
-Pengujian dijalankan pada lingkungan Python 3.11.0 dengan `pm4py==2.7.23.13` dan `PySide6==6.12.0` menggunakan mode GUI offscreen:
+Pengujian dijalankan pada Python 3.11.0 dengan `pm4py==2.7.23.13`, `PySide6==6.12.0`, dan `pandas==3.0.5` menggunakan mode Qt offscreen:
 
-- **Perintah:** `QT_QPA_PLATFORM=offscreen python -m unittest discover -s tests -v`
-- **Hasil:** **42 test dijalankan — 42 PASS, 0 FAIL, 0 ERROR** (`0.286s`):
-  - `tests/test_exercise_1122.py`: **12 PASS** (mencakup seluruh skenario `i < j`, multi-pasangan dalam satu case, dataset kosong, timestamp identik, kesetaraan `EventLog` & `DataFrame`, serta validasi atribut wajib).
-  - `tests/test_case_explorer.py`: **7 PASS** (6 unit test `CaseExplorerTests` untuk pencarian, trace lengkap + atribut opsional jujur, evidence generik, cache index, kesetaraan `EventLog` & `DataFrame`, validasi atribut wajib; serta 1 smoke test GUI offscreen `GuiWidgetsOffscreenSmokeTests` yang menguji alur lengkap `no_dataset -> ready -> loading -> loaded -> double-click buka evidence ke Case Explorer -> reset -> re-run -> empty search -> ganti dataset -> error state`).
-  - `tests/test_data_loader.py` & `tests/test_overview.py` (milik Anggota 1): **23 PASS** (14 + 9).
-- **Pengecekan Sintaks:** `python -m py_compile` pada seluruh file Python Anggota 4 lulus tanpa error.
+- **Perintah:** `$env:QT_QPA_PLATFORM="offscreen"; python -m unittest discover -s tests -v`
+- **Hasil:** **54 test dijalankan — 54 PASS, 0 FAIL, 0 ERROR**:
+  - `tests/test_exercise_1122.py`: **12 PASS**
+  - `tests/test_case_explorer.py`: **8 PASS** (6 `CaseExplorerTests`, 1 `GuiWidgetsOffscreenSmokeTests`, 1 `MainWindowAnggota4IntegrationTests` termasuk uji error `TaskThread` & `ImportOverviewPage` dengan fixture `.xes`)
+  - `tests/test_data_loader.py` & `tests/test_overview.py` (Anggota 1): **23 PASS** (14 + 9)
+  - `tests/test_integration.py` (Anggota 5): **11 PASS** (termasuk `test_main_entry_point` setelah integrasi `main.py`)
+- **Verifikasi `python main.py` terintegrasi:** Diverifikasi membuka `MainWindow` dengan `Exercise1122Page` dan `CaseExplorerPage` terpasang (`EX_MOUNTED: True`, `CE_MOUNTED: True`), mengimpor fixture XES sintetis, menjalankan 11.22 (`1/2 = 50.00%`), dan membuka `App_1001` di Case Explorer.
 
 ---
 
 ## 8. Keterbatasan Integrasi & Kebutuhan Tes XES BPIC17 Asli
 
-1. **Integrasi Main Window Anggota 5:** Pada branch `feature/fazl-exercise1122`, file main window Anggota 5 serta modul/halaman Anggota 2 (`11.7`, `11.15`) dan Anggota 3 (`11.18`) belum tersedia/tergabung, sehingga integrasi end-to-end antar halaman di dalam main window produksi belum dapat diuji.
-2. **Dataset XES BPIC17 Asli:** File XES BPIC17 asli tidak tersedia di workspace ini. Pengujian pada data skala penuh (~31.509 cases / >1 juta events) diperlukan saat integrasi final untuk memastikan performa waktu komputasi, penggunaan memori indexing Case Explorer, dan kesesuaian atribut BPIC17 nyata.
-3. **Asumsi Integrasi yang Perlu Dikonfirmasi dengan Anggota 1 & 5:**
-   - Anggota 1 mempertahankan tipe output `EventLog` (atau `DataFrame` PM4Py) dan signature sinyal `dataset_loaded(log, metadata, overview)`.
-   - Anggota 5 menghubungkan sinyal `open_case_requested(case_id, evidence)` dari halaman analisis ke slot `CaseExplorerPage.open_case(case_id, evidence)` sekaligus memindahkan navigasi aktif ke tab/halaman Case Explorer.
-   - Halaman 11.7, 11.15, dan 11.18 mengikuti pola `set_dataset(log, metadata, overview)` agar tidak terjadi pembacaan ulang file XES.
+1. **Review Perubahan `main.py`:** `main.py` mendapat penambahan minimal 2 baris (`from gui.pages import install_anggota4_pages` dan `install_anggota4_pages(window)`) untuk memasang halaman Anggota 4; perlu ditinjau Anggota 5 saat PR/merge.
+2. **Modul Anggota 2 & 3:** Halaman `exercise_117`, `exercise_115_118`, dan `export` masih berstatus placeholder di `MainWindow`.
+3. **Dataset XES BPIC17 Asli:** File XES BPIC17 asli belum tersedia di workspace sehingga hasil hitung pada data asli dan performa skala penuh (~31.509 cases / >1,2 juta events) belum diverifikasi (`NOT TESTED`).
+4. **Catatan Lingkungan:** `requirements.txt` mencantumkan `PySide6==6.11.3` dan `pandas==2.3.3` serta `README.md` mengacu Python 3.13, sedangkan lingkungan uji memakai Python 3.11.0 dengan `PySide6==6.12.0`, `pm4py==2.7.23.13`, dan `pandas==3.0.5`.
