@@ -97,13 +97,14 @@ Di dalam `install_anggota4_pages(window)`:
 
 ## 7. Hasil Pengujian yang Benar-Benar Dijalankan
 
-Pengujian dijalankan pada Python 3.11.0 dengan `pm4py==2.7.23.13`, `PySide6==6.12.0`, dan `pandas==3.0.5` menggunakan mode Qt offscreen:
+Pengujian dijalankan pada Python 3.11.0 dengan `pm4py==2.7.23.13`, `PySide6==6.12.0`, dan `pandas==3.0.5` menggunakan mode Qt offscreen setelah sinkronisasi dengan `origin/main` (termasuk modul Anggota 1, 2, 4, dan 5):
 
 - **Perintah:** `$env:QT_QPA_PLATFORM="offscreen"; python -m unittest discover -s tests -v`
-- **Hasil:** **54 test dijalankan — 54 PASS, 0 FAIL, 0 ERROR**:
-  - `tests/test_exercise_1122.py`: **12 PASS**
-  - `tests/test_case_explorer.py`: **8 PASS** (6 `CaseExplorerTests`, 1 `GuiWidgetsOffscreenSmokeTests`, 1 `MainWindowAnggota4IntegrationTests` termasuk uji error `TaskThread` & `ImportOverviewPage` dengan fixture `.xes`)
+- **Hasil:** **67 test dijalankan — 67 PASS, 0 FAIL, 0 ERROR** (`7.139s`):
+  - `tests/test_exercise_1122.py` (Anggota 4): **12 PASS**
+  - `tests/test_case_explorer.py` (Anggota 4): **8 PASS** (6 `CaseExplorerTests`, 1 `GuiWidgetsOffscreenSmokeTests`, 1 `MainWindowAnggota4IntegrationTests` termasuk uji error `TaskThread` & `ImportOverviewPage` dengan fixture `.xes`)
   - `tests/test_data_loader.py` & `tests/test_overview.py` (Anggota 1): **23 PASS** (14 + 9)
+  - `tests/test_exercise_117.py` (Anggota 2): **13 PASS**
   - `tests/test_integration.py` (Anggota 5): **11 PASS** (termasuk `test_main_entry_point` setelah integrasi `main.py`)
 - **Verifikasi `python main.py` terintegrasi:** Diverifikasi membuka `MainWindow` dengan `Exercise1122Page` dan `CaseExplorerPage` terpasang (`EX_MOUNTED: True`, `CE_MOUNTED: True`), mengimpor fixture XES sintetis, menjalankan 11.22 (`1/2 = 50.00%`), dan membuka `App_1001` di Case Explorer.
 

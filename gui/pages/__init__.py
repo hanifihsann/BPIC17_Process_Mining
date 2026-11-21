@@ -1,11 +1,13 @@
-"""Reusable PySide6 page widgets and MainWindow installer owned by Member 4."""
+"""Reusable PySide6 page widgets and installers for BPIC17 Process Mining."""
 
 from __future__ import annotations
 
 from typing import Any
 
 from gui.pages.case_explorer_page import CaseExplorerPage
+from gui.pages.exercise_117_page import Exercise117Page
 from gui.pages.exercise_1122_page import Exercise1122Page
+from gui.pages.export_page import ExportPage
 
 
 def install_anggota4_pages(window: Any) -> tuple[Exercise1122Page, CaseExplorerPage]:
@@ -32,4 +34,10 @@ def install_anggota4_pages(window: Any) -> tuple[Exercise1122Page, CaseExplorerP
     return ex1122_page, case_explorer_page
 
 
-__all__ = ["Exercise1122Page", "CaseExplorerPage", "install_anggota4_pages"]
+__all__ = [
+    "Exercise117Page",
+    "Exercise1122Page",
+    "CaseExplorerPage",
+    "ExportPage",
+    "install_anggota4_pages",
+]
