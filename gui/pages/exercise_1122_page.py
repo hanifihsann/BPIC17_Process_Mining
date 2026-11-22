@@ -1,8 +1,8 @@
 """Embeddable PySide6 page for Exercise 11.22 (O_Cancelled -> O_Accepted).
 
-Designed to be mounted inside Member 5's main application window as a QWidget.
-Does not instantiate a QApplication or a second QMainWindow, and never reloads
-the XES file from disk.
+Designed to be mounted inside Member 5's ``MainWindow`` via ``install_page``
+with ``TaskControls``, ``AppState``, and ``window.run_task``. Also works in
+standalone widget mode for isolated tests without duplicating ``QMainWindow``.
 """
 
 from __future__ import annotations
@@ -13,6 +13,7 @@ from typing import Any
 from PySide6.QtCore import QObject, QThread, Qt, Signal, Slot
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QApplication,
     QFormLayout,
     QGridLayout,
     QGroupBox,
@@ -27,6 +28,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from gui.widgets import TaskControls
 from modules.exercise_1122 import RULE_DESCRIPTION, analyze_1122
 
 
@@ -72,6 +74,7 @@ class Exercise1122Page(QWidget):
     case_selected = Signal(object, object)
     open_case_requested = Signal(object, object)
     state_changed = Signal(str)
+    _shell_failed_signal = Signal(str)
 
     def __init__(
         self,
@@ -86,13 +89,21 @@ class Exercise1122Page(QWidget):
         self._evidence_rows: list[dict[str, Any]] = []
         self._on_open_case = on_open_case
         self._state: str = "no_dataset"
+        self._host_window: Any | None = None
 
         self._thread: QThread | None = None
         self._worker: Exercise1122Worker | None = None
+        self._pending_dataset: tuple[Any, dict[str, Any] | None] | None = None
         self._closing = False
 
         self._build_ui()
-        self._apply_state("no_dataset", "Dataset belum dimuat. Muat file XES pada halaman Import/Overview.")
+        app = QApplication.instance()
+        if app is not None:
+            app.aboutToQuit.connect(self._wait_for_thread)
+        self._apply_state(
+            "no_dataset",
+            "Dataset belum dimuat. Muat file XES pada halaman Import Dataset.",
+        )
 
     def _build_ui(self) -> None:
         self.setObjectName("exercise1122Page")
@@ -107,16 +118,19 @@ class Exercise1122Page(QWidget):
         control_layout.addWidget(self.rule_label)
 
         btn_row = QHBoxLayout()
+        # Shared shell controls (visible when bound to MainWindow)
+        self.task_controls = TaskControls("Jalankan Analisis")
+        self.task_controls.hide()
+        btn_row.addWidget(self.task_controls)
+
+        # Standalone controls (hidden when bound to MainWindow)
         self.run_button = QPushButton("Jalankan Analisis")
+        self.run_button.setObjectName("primaryAction")
         self.run_button.clicked.connect(self.run_analysis)
         self.reset_button = QPushButton("Reset Hasil")
         self.reset_button.clicked.connect(self.reset_results)
-        self.open_explorer_button = QPushButton("Buka di Case Explorer")
-        self.open_explorer_button.clicked.connect(self._open_selected_row)
-
         btn_row.addWidget(self.run_button)
         btn_row.addWidget(self.reset_button)
-        btn_row.addWidget(self.open_explorer_button)
         btn_row.addStretch(1)
         control_layout.addLayout(btn_row)
 
@@ -153,7 +167,10 @@ class Exercise1122Page(QWidget):
         self.filter_input = QLineEdit()
         self.filter_input.setPlaceholderText("Ketik sebagian Case ID...")
         self.filter_input.textChanged.connect(self._filter_table)
-        filter_row.addWidget(self.filter_input)
+        filter_row.addWidget(self.filter_input, 1)
+        self.open_explorer_button = QPushButton("Buka di Case Explorer")
+        self.open_explorer_button.clicked.connect(self._open_selected_row)
+        filter_row.addWidget(self.open_explorer_button)
         table_layout.addLayout(filter_row)
 
         self.result_table = QTableWidget(0, 6)
@@ -187,11 +204,82 @@ class Exercise1122Page(QWidget):
         table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         table.setSelectionBehavior(QAbstractItemView.SelectRows)
         table.setSelectionMode(QAbstractItemView.SingleSelection)
+        table.setHorizontalScrollMode(QAbstractItemView.ScrollPerPixel)
         table.setAlternatingRowColors(True)
         table.setSortingEnabled(False)
+        table.horizontalHeader().setMinimumSectionSize(75)
         table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
         table.horizontalHeader().setStretchLastSection(True)
         table.verticalHeader().setVisible(False)
+
+    def bind_main_window(self, window: Any) -> TaskControls:
+        """Connect this page to Member 5's ``MainWindow`` shell and ``AppState``."""
+
+        if self._host_window is window:
+            return self.task_controls
+
+        self._host_window = window
+        self.run_button.hide()
+        self.reset_button.hide()
+        self.task_controls.show()
+
+        self.task_controls.run_requested.connect(self._run_via_main_window)
+        window.state.dataset_changed.connect(self.set_dataset)
+        window.state.result_changed.connect(self._on_shell_result_changed)
+        self._shell_failed_signal.connect(self._on_worker_failed)
+
+        if window.state.dataset is not None:
+            self.set_dataset(window.state.dataset)
+        if window.state.has_result("exercise_1122"):
+            self._render_result(window.state.result("exercise_1122"))
+
+        return self.task_controls
+
+    @Slot()
+    def _run_via_main_window(self) -> None:
+        if self._host_window is None:
+            self.run_analysis()
+            return
+        self._apply_state("loading", "Sedang menjalankan analisis Exercise 11.22...")
+        self.analysis_started.emit()
+
+        def _operation(dataset: Any) -> dict[str, Any]:
+            try:
+                return analyze_1122(dataset.log)
+            except Exception as error:
+                self._shell_failed_signal.emit(str(error))
+                raise
+
+        accepted = self._host_window.run_task(
+            "exercise_1122",
+            "Analisis Exercise 11.22",
+            _operation,
+        )
+        if not accepted:
+            if self._active_log is None:
+                self._apply_state("no_dataset", "Impor dataset XES sebelum menjalankan analisis.")
+            elif self._last_result is not None:
+                self._apply_state("loaded", "Menampilkan hasil analisis sebelumnya.")
+            else:
+                self._apply_state("ready", "Proses lain sedang berjalan; tunggu hingga selesai.")
+
+    @Slot(str)
+    def _on_shell_result_changed(self, page_key: str) -> None:
+        if page_key != "exercise_1122" or self._host_window is None:
+            return
+        if self._host_window.state.has_result("exercise_1122"):
+            result = self._host_window.state.result("exercise_1122")
+            self._render_result(result)
+            self.analysis_completed.emit(result)
+        else:
+            self._clear_result_widgets()
+            if self._active_log is None:
+                self._apply_state("no_dataset", "Dataset belum dimuat.")
+            else:
+                self._apply_state(
+                    "ready",
+                    "Hasil analisis direset. Gunakan 'Jalankan Analisis' atau 'Jalankan ulang'.",
+                )
 
     @property
     def current_state(self) -> str:
@@ -206,7 +294,7 @@ class Exercise1122Page(QWidget):
         return self._last_result
 
     def is_running(self) -> bool:
-        """Return True if a background analysis thread is currently active."""
+        """Return True if a standalone background analysis thread is active."""
 
         return self._thread is not None
 
@@ -241,11 +329,19 @@ class Exercise1122Page(QWidget):
         metadata: dict[str, Any] | None = None,
         overview: dict[str, Any] | None = None,
     ) -> None:
-        """Attach the active in-memory dataset without reading XES from disk."""
+        """Attach the active in-memory dataset (or ``ActiveDataset``) without reading XES."""
 
         del overview  # Not required for 11.22; accepted for signal compatibility.
+        if hasattr(log_or_df, "log") and hasattr(log_or_df, "metadata"):
+            metadata = log_or_df.metadata
+            log_or_df = log_or_df.log
+
         if self.is_running():
-            self._apply_state("loading", "Analisis sedang berjalan; tunggu hingga selesai sebelum mengganti dataset.")
+            self._pending_dataset = (log_or_df, metadata if isinstance(metadata, dict) else None)
+            self._apply_state(
+                "loading",
+                "Analisis sedang berjalan; dataset baru akan diterapkan setelah selesai.",
+            )
             return
 
         self._active_log = log_or_df
@@ -289,6 +385,10 @@ class Exercise1122Page(QWidget):
     def reset_results(self) -> None:
         """Reset displayed analysis results while keeping the active dataset."""
 
+        if self._host_window is not None:
+            self._host_window.reset_result("exercise_1122")
+            return
+
         if self.is_running():
             return
         self._clear_result_widgets()
@@ -311,7 +411,11 @@ class Exercise1122Page(QWidget):
 
     @Slot()
     def run_analysis(self) -> None:
-        """Run Exercise 11.22 on the active dataset using a background QThread."""
+        """Run Exercise 11.22 on the active dataset (shell worker or standalone QThread)."""
+
+        if self._host_window is not None:
+            self._run_via_main_window()
+            return
 
         if self._active_log is None:
             self._apply_state("no_dataset", "Dataset belum dimuat. Tidak dapat menjalankan analisis.")
@@ -341,11 +445,7 @@ class Exercise1122Page(QWidget):
         self._worker = worker
         thread.start()
 
-    @Slot(object)
-    def _on_worker_completed(self, result: dict[str, Any]) -> None:
-        if self._closing:
-            return
-
+    def _render_result(self, result: dict[str, Any]) -> None:
         self._last_result = result
         self._evidence_rows = list(result.get("evidence", []))
 
@@ -371,6 +471,11 @@ class Exercise1122Page(QWidget):
                 f"Analisis selesai: {count} dari {total_cases} case ({percentage:.2f}%) memenuhi aturan 11.22.",
             )
 
+    @Slot(object)
+    def _on_worker_completed(self, result: dict[str, Any]) -> None:
+        if self._closing:
+            return
+        self._render_result(result)
         self.analysis_completed.emit(result)
 
     @Slot(str)
@@ -386,6 +491,10 @@ class Exercise1122Page(QWidget):
         if self.sender() is self._thread or self._thread is None:
             self._thread = None
             self._worker = None
+            if self._pending_dataset is not None and not self._closing:
+                log_or_df, metadata = self._pending_dataset
+                self._pending_dataset = None
+                self.set_dataset(log_or_df, metadata)
 
     def _populate_table(self, evidence_rows: list[dict[str, Any]]) -> None:
         self.result_table.setRowCount(len(evidence_rows))
@@ -442,9 +551,8 @@ class Exercise1122Page(QWidget):
         if self._on_open_case is not None:
             self._on_open_case(case_id, record)
 
-    def closeEvent(self, event) -> None:  # noqa: N802 - Qt API name
-        """Wait cleanly for any active worker thread before closing."""
-
+    @Slot()
+    def _wait_for_thread(self) -> None:
         self._closing = True
         thread = self._thread
         if thread is not None and thread.isRunning():
@@ -453,4 +561,9 @@ class Exercise1122Page(QWidget):
             thread.wait()
         self._thread = None
         self._worker = None
+
+    def closeEvent(self, event) -> None:  # noqa: N802 - Qt API name
+        """Wait cleanly for any active worker thread before closing."""
+
+        self._wait_for_thread()
         super().closeEvent(event)
