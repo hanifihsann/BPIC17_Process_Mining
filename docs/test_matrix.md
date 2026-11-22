@@ -3,6 +3,8 @@
 Dokumen ini mencatat skenario pengujian fungsional, pengujian kasus batas, pengujian integrasi lintas halaman, serta status verifikasi aktual untuk seluruh modul Proyek Tahap 1.  
 Status hanya ditulis `PASS` atau `FAIL` berdasarkan eksekusi pengujian yang benar-benar dijalankan. Fitur milik anggota lain yang belum tersedia atau belum dijalankan pada branch `main` ditandai `NOT TESTED`.
 
+Audit final 22 November 2026 mencatat **76 tes lulus**, seluruh delapan hasil cocok pada XES asli, dan CSV ringkasan serta evidence berhasil diverifikasi. Lihat [laporan akhir](test_report.md) untuk hasil, screenshot, dan alur demo. Matriks di bawah mencatat verifikasi saat penggabungan modul.
+
 ---
 
 ## A. Tabel Matriks Pengujian
@@ -40,7 +42,7 @@ Status hanya ditulis `PASS` atau `FAIL` berdasarkan eksekusi pengujian yang bena
 
 ---
 
-## B. Ringkasan Eksekusi Terakhir
+## B. Ringkasan Eksekusi Saat Penggabungan Modul
 - **Perintah:** `$env:QT_QPA_PLATFORM="offscreen"; .\.venv\Scripts\python.exe -m unittest discover -s tests -v`
 - **Waktu / Hasil:** `Ran 74 tests in 8.304s — OK` (**74 PASS, 0 FAIL, 0 ERROR**)
   - `tests/test_data_loader.py` (Anggota 1): 14 PASS

@@ -59,6 +59,8 @@ def _is_missing(value: Any) -> bool:
 
     if value is None:
         return True
+    if isinstance(value, str):
+        return not value.strip()
 
     try:
         result = pd.isna(value)
@@ -98,6 +100,8 @@ def _validate_event_log(log: EventLog) -> dict[str, Any]:
 
     trace_attributes: set[str] = set()
     event_attributes: set[str] = set()
+    seen_ids = set()
+    duplicate_ids = 0
     missing_case_ids = 0
     missing_activity = 0
     missing_timestamp = 0
@@ -105,8 +109,13 @@ def _validate_event_log(log: EventLog) -> dict[str, Any]:
 
     for trace in log:
         trace_attributes.update(str(key) for key in trace.attributes.keys())
-        if _is_missing(trace.attributes.get("concept:name")):
+        case_id = trace.attributes.get("concept:name")
+        if _is_missing(case_id):
             missing_case_ids += 1
+        elif case_id in seen_ids:
+            duplicate_ids += 1
+        else:
+            seen_ids.add(case_id)
 
         for event in trace:
             result["event_count"] += 1
@@ -143,6 +152,11 @@ def _validate_event_log(log: EventLog) -> dict[str, Any]:
     if missing_case_ids:
         result["errors"].append(
             f"{missing_case_ids} trace(s) tidak memiliki case ID 'concept:name'."
+        )
+    if duplicate_ids:
+        result["invalid_value_counts"]["trace:concept:name"] = duplicate_ids
+        result["errors"].append(
+            f"{duplicate_ids} trace memiliki Case ID duplikat; setiap trace harus memiliki ID unik."
         )
     if missing_activity:
         result["errors"].append(

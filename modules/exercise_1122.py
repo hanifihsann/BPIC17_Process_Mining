@@ -6,6 +6,7 @@ This module operates strictly on an already-loaded PM4Py ``EventLog`` or PM4Py
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from typing import Any
 
 import pandas as pd
@@ -106,10 +107,9 @@ def _evaluate_case_events(
     }
 
 
-def _extract_cases_from_event_log(log: EventLog) -> list[tuple[Any, list[dict[str, Any]]]]:
+def _extract_cases_from_event_log(log: EventLog) -> Iterator[tuple[Any, list[dict[str, Any]]]]:
     """Validate and extract ordered case event sequences from a PM4Py EventLog."""
 
-    cases: list[tuple[Any, list[dict[str, Any]]]] = []
     for trace_idx, trace in enumerate(log):
         case_id = trace.attributes.get("concept:name")
         if _is_missing(case_id):
@@ -137,9 +137,7 @@ def _extract_cases_from_event_log(log: EventLog) -> list[tuple[Any, list[dict[st
                     resource=event.get("org:resource"),
                 )
             )
-        cases.append((case_id, case_events))
-
-    return cases
+        yield case_id, case_events
 
 
 def _extract_cases_from_dataframe(df: pd.DataFrame) -> list[tuple[Any, list[dict[str, Any]]]]:
@@ -227,14 +225,15 @@ def analyze_1122(
 
     if isinstance(log_or_df, EventLog):
         cases = _extract_cases_from_event_log(log_or_df)
+        total_cases = len(log_or_df)
     elif hasattr(log_or_df, "columns") and hasattr(log_or_df, "itertuples"):
         cases = _extract_cases_from_dataframe(log_or_df)
+        total_cases = len(cases)
     else:
         raise TypeError(
             "Input harus berupa PM4Py EventLog atau DataFrame PM4Py."
         )
 
-    total_cases = len(cases)
     case_ids: list[Any] = []
     evidence: list[dict[str, Any]] = []
 

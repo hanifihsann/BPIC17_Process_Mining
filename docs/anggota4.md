@@ -8,7 +8,7 @@
 | `modules/case_explorer.py` | Inspeksi trace case lengkap, pencarian, indexing cache, dan penanda evidence | `get_case_trace`, `get_case_detail`, `list_cases`, `search_cases`, `build_case_index`, `CaseIndex`, `clear_case_index_cache` |
 | `gui/pages/__init__.py` | Paket halaman reusable GUI desktop & helper pemasangan `MainWindow` | `Exercise1122Page`, `CaseExplorerPage`, `install_anggota4_pages` |
 | `gui/pages/exercise_1122_page.py` | Widget `QWidget` halaman Exercise 11.22 (mendukung `MainWindow` `TaskControls`/`TaskThread` & standalone `QThread`) | `Exercise1122Page`, `Exercise1122Worker` |
-| `gui/pages/case_explorer_page.py` | Widget `QWidget` halaman Case Explorer (mendukung `AppState.dataset_changed` & background indexing `QThread`) | `CaseExplorerPage`, `CaseIndexWorker` |
+| `gui/pages/case_explorer_page.py` | Widget `QWidget` halaman Case Explorer dengan `AppState.dataset_changed` dan indeks background | `CaseExplorerPage`, `TaskThread` |
 | `tests/test_exercise_1122.py` | Unit test Exercise 11.22 untuk `EventLog` & `DataFrame` | `Exercise1122Tests` |
 | `tests/test_case_explorer.py` | Unit test Case Explorer, smoke test standalone, & uji integrasi `MainWindow` end-to-end | `CaseExplorerTests`, `GuiWidgetsOffscreenSmokeTests`, `MainWindowAnggota4IntegrationTests` |
 | `docs/test_matrix.md` | Matriks uji gabungan lintas fitur (11.7, 11.15, 11.18, 11.22, integrasi) | Tabel skenario, expected/actual, status |

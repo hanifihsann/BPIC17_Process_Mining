@@ -52,6 +52,16 @@ class ValidateLogTests(unittest.TestCase):
         self.assertFalse(result["valid"])
         self.assertEqual(result["missing_value_counts"]["trace:concept:name"], 1)
 
+    def test_blank_and_duplicate_case_ids_are_rejected(self):
+        timestamp = datetime.now(timezone.utc)
+        log = make_log(timestamp)
+        log.append(make_log(timestamp)[0])
+        log.append(make_log(timestamp, case_id="  ")[0])
+        result = validate_log(log)
+        self.assertFalse(result["valid"])
+        self.assertEqual(result["invalid_value_counts"]["trace:concept:name"], 1)
+        self.assertEqual(result["missing_value_counts"]["trace:concept:name"], 1)
+
     def test_dataframe_required_values(self):
         dataframe = pd.DataFrame(
             {

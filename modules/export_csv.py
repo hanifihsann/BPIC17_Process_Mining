@@ -8,38 +8,24 @@ Provides clean, structured CSV export functionality for:
 from __future__ import annotations
 
 import csv
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 from typing import Any
 
 
-def export_summary_to_csv(
-    results: dict[str, Any],
-    filepath: str | Path,
-) -> Path:
-    """Export exercise analysis summary metrics to a CSV file.
+SUMMARY_HEADERS = [
+    "Kode",
+    "Subsoal",
+    "Pertanyaan",
+    "Aturan / Filter",
+    "Jumlah Case Terpilih",
+    "Total Case Aktif (Denominator)",
+    "Persentase (%)",
+    "Rata-rata Cycle Time (Hari)",
+]
 
-    Parameters:
-        results: Result dict, such as that returned by ``analyze_117`` or multi-exercise dictionaries.
-        filepath: Destination file path.
-
-    Returns:
-        Path object pointing to the written CSV file.
-    """
-    path = Path(filepath)
-    path.parent.mkdir(parents=True, exist_ok=True)
-
-    headers = [
-        "Kode",
-        "Subsoal",
-        "Pertanyaan",
-        "Aturan / Filter",
-        "Jumlah Case Terpilih",
-        "Total Case Aktif (Denominator)",
-        "Persentase (%)",
-        "Rata-rata Cycle Time (Hari)",
-    ]
-
+def _summary_rows(results: dict[str, Any]) -> list[list[Any]]:
     rows: list[list[Any]] = []
 
     # If it is an Exercise 11.7 result dict
@@ -62,14 +48,15 @@ def export_summary_to_csv(
         # 11.7 B
         sub_b = results.get("11.7_b", {})
         mean_b = sub_b.get("mean_cycle_time_days", 0.0)
+        valid_count = sub_b.get("valid_duration_cases", total_cases)
         rows.append([
             "11.7 B",
             sub_b.get("subsoal", "11.7 B"),
             sub_b.get("question", "Rata-rata cycle time seluruh case"),
             sub_b.get("rule", ""),
-            sub_b.get("valid_duration_cases", total_cases),
+            valid_count,
             total_cases,
-            100.0 if total_cases > 0 else 0.0,
+            100.0 * valid_count / total_cases if total_cases else 0.0,
             f"{mean_b:.4f}" if isinstance(mean_b, (int, float)) else str(mean_b),
         ])
 
@@ -91,17 +78,54 @@ def export_summary_to_csv(
                     pct_str,
                     mean_str,
                 ])
+    elif results.get("exercise") in {"11.15 & 11.18", "11.22"}:
+        total = results["total_cases"]
+        codes = ("11.15", "11.18") if results["exercise"] == "11.15 & 11.18" else ("11.22",)
+        questions = {
+            "11.15": "Case dengan minimal dua penyelesaian aktivitas fraud",
+            "11.18": "Case dengan minimal dua penyelesaian oleh resource yang sama",
+            "11.22": "Case dengan O_Cancelled sebelum O_Accepted",
+        }
+        for code in codes:
+            section = results if code == "11.22" else results[code]
+            count = section["count"]
+            percentage = 100 * count / total if total else 0.0
+            rows.append([code, code, questions[code], section["rule"], count, total, percentage, "-"])
     else:
-        # Generic table export if results are provided as custom rows
-        for row in results.get("rows", []):
-            rows.append(list(row))
+        rows.extend(list(row) for row in results.get("rows", []))
+    return rows
 
-    with open(path, mode="w", newline="", encoding="utf-8-sig") as file:
-        writer = csv.writer(file)
-        writer.writerow(headers)
-        writer.writerows(rows)
 
+def _write_csv(filepath: str | Path, headers: Sequence[str], rows: Iterable[Sequence[Any]]) -> Path:
+    """Replace the destination only after all CSV rows have been written."""
+    path = Path(filepath)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = None
+    try:
+        with NamedTemporaryFile(
+            dir=path.parent, mode="w", newline="", encoding="utf-8-sig", delete=False
+        ) as file:
+            temp_path = Path(file.name)
+            writer = csv.writer(file)
+            writer.writerow(headers)
+            writer.writerows(rows)
+        temp_path.replace(path)
+    finally:
+        if temp_path is not None:
+            temp_path.unlink(missing_ok=True)
     return path
+
+
+def export_summary_to_csv(results: dict[str, Any], filepath: str | Path) -> Path:
+    """Export the summary of one analysis."""
+    return _write_csv(filepath, SUMMARY_HEADERS, _summary_rows(results))
+
+
+def export_completed_summary_to_csv(
+    results: Iterable[dict[str, Any]], filepath: str | Path
+) -> Path:
+    """Export completed analyses into a single summary CSV."""
+    return _write_csv(filepath, SUMMARY_HEADERS, (row for result in results for row in _summary_rows(result)))
 
 
 def export_cases_to_csv(
@@ -120,9 +144,6 @@ def export_cases_to_csv(
     Returns:
         Path object pointing to the written CSV file.
     """
-    path = Path(filepath)
-    path.parent.mkdir(parents=True, exist_ok=True)
-
     headers = [
         "Case ID",
         "Kategori / Subsoal",
@@ -133,6 +154,11 @@ def export_cases_to_csv(
         "Jumlah Event Trace",
         "Timestamp Event Pertama",
         "Timestamp Event Terakhir",
+        "Resource",
+        "Timestamp Evidence",
+        "Lifecycle Evidence",
+        "Aturan / Filter",
+        "Total Case Aktif (Denominator)",
     ]
 
     rows: list[list[Any]] = []
@@ -148,6 +174,12 @@ def export_cases_to_csv(
         trace_len = item.get("trace_length", "-")
         first_ts = item.get("first_timestamp", "")
         last_ts = item.get("last_timestamp", "")
+        evidence_events = item.get("evidence_events", [])
+        if "cancelled_event" in item:
+            evidence_events = (item["cancelled_event"], item["accepted_event"])
+            activity = " → ".join(event["activity"] for event in evidence_events)
+        evidence_timestamps = ";".join(str(event["timestamp"]) for event in evidence_events)
+        evidence_lifecycle = ";".join(str(event.get("lifecycle") or "-") for event in evidence_events)
 
         rows.append([
             case_id,
@@ -159,11 +191,33 @@ def export_cases_to_csv(
             trace_len,
             str(first_ts) if first_ts is not None else "",
             str(last_ts) if last_ts is not None else "",
+            item.get("resource_id"),
+            evidence_timestamps,
+            evidence_lifecycle,
+            item.get("rule"),
+            item.get("total_cases"),
         ])
 
-    with open(path, mode="w", newline="", encoding="utf-8-sig") as file:
-        writer = csv.writer(file)
-        writer.writerow(headers)
-        writer.writerows(rows)
+    return _write_csv(filepath, headers, rows)
 
-    return path
+
+def case_export_rows(
+    result: dict[str, Any], codes: Sequence[str]
+) -> list[dict[str, Any]]:
+    """Attach the exercise rule and denominator to each existing evidence row."""
+    rows = []
+    for code in codes:
+        if code.startswith("11.7 "):
+            section = result["11.7_" + code[-1].lower()]
+        else:
+            section = result if code == "11.22" else result[code]
+        rows.extend(
+            {
+                **item,
+                "subsoal": code,
+                "rule": section["rule"],
+                "total_cases": result["total_cases"],
+            }
+            for item in section["evidence"]
+        )
+    return rows

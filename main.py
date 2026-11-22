@@ -26,34 +26,23 @@ def setup_feature_pages(window: MainWindow) -> None:
     )
 
     # Member 2: Exercise 11.7
-    ex117_page = Exercise117Page(state=window.state)
+    ex117_page = Exercise117Page()
+    ex117_page.bind_main_window(window)
     window.install_page("exercise_117", ex117_page)
-    window.state.dataset_changed.connect(
-        lambda ds: ex117_page.set_dataset(
-            ds.log if ds else None, ds.metadata if ds else None, ds.overview if ds else None
-        )
-    )
-    ex117_page.analysis_completed.connect(
-        lambda res: window.state.save_result(window.state.dataset, "exercise_117", res)
-        if window.state.dataset else None
-    )
 
     # Member 2: Export Results
-    export_page = ExportPage(window.state, ex117_page=ex117_page)
+    export_page = ExportPage(window.state, host_window=window)
     window.install_page("export", export_page)
 
     # Member 4: Case Explorer & Exercise 11.22
-    try:
-        _, ce_page = install_anggota4_pages(window)
+    _, ce_page = install_anggota4_pages(window)
 
-        def open_in_ce(case_id, evidence):
-            ce_page.open_case(case_id, evidence)
-            window.navigate("case_explorer")
+    def open_in_ce(case_id, evidence):
+        window.navigate("case_explorer")
+        ce_page.open_case(case_id, evidence)
 
-        ex117_page.open_case_requested.connect(open_in_ce)
-        ex115118_page.open_case_requested.connect(open_in_ce)
-    except Exception as exc:
-        logging.getLogger(__name__).warning("Modul halaman tambahan belum siap: %s", exc)
+    ex117_page.open_case_requested.connect(open_in_ce)
+    ex115118_page.open_case_requested.connect(open_in_ce)
 
 
 def main() -> int:

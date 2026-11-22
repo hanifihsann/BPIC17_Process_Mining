@@ -307,7 +307,7 @@ class GuiWidgetsOffscreenSmokeTests(unittest.TestCase):
         ce_page.set_dataset(new_log, {"file_name": "new.xes", "case_count": 1})
         self.assertTrue(self._wait_until(lambda: not ce_page.is_indexing()))
         self.assertEqual(ex_page.current_state, "ready")
-        self.assertEqual(ce_page.case_table.rowCount(), 1)
+        self.assertEqual(ce_page.case_table.model().rowCount(), 1)
 
         ex_page.run_analysis()
         self.assertTrue(
@@ -459,7 +459,7 @@ class MainWindowAnggota4IntegrationTests(unittest.TestCase):
 
         ce_page.reset_view()
         self.assertEqual(ce_page.current_state, "ready")
-        self.assertEqual(ce_page.case_table.rowCount(), 3)
+        self.assertEqual(ce_page.case_table.model().rowCount(), 3)
 
         # Navigate back to Exercise 11.22 -> Reset & Re-run via MainWindow TaskControls
         window.navigate("exercise_1122")

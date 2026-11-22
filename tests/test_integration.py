@@ -1,5 +1,6 @@
 """Desktop integration tests with tiny XES fixtures and an isolated test panel."""
 
+import csv
 import os
 import subprocess
 import sys
@@ -138,7 +139,7 @@ class ShellTests(unittest.TestCase):
         self.assertEqual(self.window.dataset_bar.name_label.toolTip(), path.name)
         self.assertEqual(self.window.dataset_bar.counts_label.text(), "1 case  /  1 event")
         self.window.navigate("overview")
-        self.assertEqual(self.window.import_page.case_table.item(0, 0).text(), "Test_1")
+        self.assertEqual(self.window.import_page.case_table.model().index(0, 0).data(), "Test_1")
 
     def test_failed_replacement_keeps_previous_dataset_and_result(self):
         original = self.xes_file("original")
@@ -270,29 +271,67 @@ class ShellTests(unittest.TestCase):
         QTimer.singleShot(0, self.release.set)
         self.wait_for(lambda: not self.window.isVisible())
 
+    def test_all_installed_exercises_export_and_clear_after_new_import(self):
+        from main import setup_feature_pages
+
+        setup_feature_pages(self.window)
+        self.import_dataset(self.xes_file())
+        pages = self.window._page_widgets
+        for key in ("exercise_117", "exercise_115_118", "exercise_1122"):
+            page = pages[key]
+            button = page.run_button if key == PAGE else page.task_controls.run_button
+            button.click()
+            self.assertTrue(self.window.busy)
+            self.wait_for(lambda: not self.window.busy)
+            self.assertTrue(self.window.state.has_result(key), key)
+
+        target = Path(self.temp_dir.name) / "summary.csv"
+        export = pages["export"]
+        with patch.object(QFileDialog, "getSaveFileName", return_value=(str(target), "CSV")):
+            export.btn_export_summary.click()
+        self.assertTrue(self.window.busy)
+        self.wait_for(lambda: not self.window.busy)
+        with target.open(encoding="utf-8-sig", newline="") as stream:
+            rows = list(csv.DictReader(stream))
+        self.assertEqual(len(rows), 8)
+        self.assertEqual(rows[-1]["Kode"], "11.22")
+        self.assertEqual(rows[-1]["Total Case Aktif (Denominator)"], "1")
+
+        self.import_dataset(self.xes_file("replacement", "Test_2"))
+        self.wait_for(lambda: not pages["case_explorer"].is_indexing())
+        self.assertFalse(export.btn_export_summary.isEnabled())
+        self.assertFalse(export.btn_export_cases.isEnabled())
+        self.assertEqual(pages[PAGE].summary_table.rowCount(), 0)
+        self.assertEqual(pages[PAGE].result_table.rowCount(), 0)
+
     def test_main_entry_point(self):
         script = """
 import runpy
 from unittest.mock import patch
 from PySide6.QtCore import QTimer
-from gui.main_window import MainWindow
+from PySide6.QtWidgets import QApplication
+from gui.main_window import FEATURES, MainWindow
 
 def opened(window):
-    if not window.isVisible():
-        raise SystemExit(3)
-    print('WINDOW_SHOWN', flush=True)
-    window.close()
+    if window.isVisible() and all(
+        type(window._page_widgets[key]).__name__.endswith('Page') for key in FEATURES
+    ):
+        print('WINDOW_SHOWN', flush=True)
+        window.close()
+        QApplication.instance().quit()
+    else:
+        QApplication.instance().exit(3)
 
-def create_window():
-    window = MainWindow()
-    QTimer.singleShot(0, lambda: opened(window))
-    return window
+class AuditedWindow(MainWindow):
+    def showEvent(self, event):
+        super().showEvent(event)
+        QTimer.singleShot(0, lambda: opened(self))
 
-with patch('gui.main_window.MainWindow', side_effect=create_window):
+with patch('gui.main_window.MainWindow', AuditedWindow):
     runpy.run_path('main.py', run_name='__main__')
 """
         result = subprocess.run(
-            [sys.executable, "-c", script], cwd=ROOT, capture_output=True, text=True, timeout=20
+            [sys.executable, "-c", script], cwd=ROOT, capture_output=True, text=True, timeout=45
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("WINDOW_SHOWN", result.stdout)

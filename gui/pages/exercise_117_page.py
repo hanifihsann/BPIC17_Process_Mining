@@ -90,7 +90,7 @@ class CaseResultsTableModel(QAbstractTableModel):
                 return Qt.AlignmentFlag.AlignCenter
             return Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft
 
-        if role == Qt.ItemDataRole.DisplayRole:
+        if role in (Qt.ItemDataRole.DisplayRole, Qt.ItemDataRole.ToolTipRole):
             if col == 0:
                 return str(case.get("case_id", ""))
             elif col == 1:
@@ -162,6 +162,8 @@ class Exercise117Page(QWidget):
         super().__init__(parent)
         self.setObjectName("exercise117Page")
         self._state_mgr = state
+        self._host_window = None
+        self._operations_available = True
         self._active_log: Any | None = None
         self._active_metadata: dict[str, Any] | None = None
         self._last_result: dict[str, Any] | None = None
@@ -248,7 +250,13 @@ class Exercise117Page(QWidget):
         self.summary_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         self.summary_table.horizontalHeader().setStretchLastSection(True)
         self.summary_table.verticalHeader().setVisible(False)
-        self.summary_table.setMaximumHeight(210)
+        for column, width in enumerate((70, 190, 200, 86, 108, 84, 145)):
+            self.summary_table.setColumnWidth(column, width)
+        self.summary_table.setMinimumHeight(
+            5 * self.summary_table.verticalHeader().defaultSectionSize()
+            + self.summary_table.horizontalHeader().sizeHint().height()
+            + self.summary_table.horizontalScrollBar().sizeHint().height() + 4
+        )
         summary_layout.addWidget(self.summary_table)
         splitter.addWidget(summary_box)
 
@@ -301,6 +309,7 @@ class Exercise117Page(QWidget):
         self.result_table.verticalHeader().setVisible(False)
         self.result_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         self.result_table.horizontalHeader().setStretchLastSection(True)
+        self.result_table.setColumnWidth(0, 155)
 
         self.result_table.selectionModel().selectionChanged.connect(self._on_selection_changed)
         self.result_table.doubleClicked.connect(lambda _: self._open_selected_row())
@@ -319,7 +328,47 @@ class Exercise117Page(QWidget):
         return self._last_result
 
     def is_running(self) -> bool:
-        return self._thread is not None
+        return self._thread is not None or self._state == "loading"
+
+    def bind_main_window(self, window: Any) -> None:
+        """Use the shell worker and dataset state in the desktop application."""
+        self._host_window = window
+        self._state_mgr = window.state
+        window.state.dataset_changed.connect(self._set_active_dataset)
+        window.state.result_changed.connect(self._on_shell_result)
+        window.operations_available.connect(self._set_operations_available)
+        window.task_failed.connect(self._on_shell_failure)
+        self._set_active_dataset(window.state.dataset)
+
+    @Slot(object)
+    def _set_active_dataset(self, dataset: Any) -> None:
+        if dataset is None:
+            self.set_dataset(None)
+        else:
+            self.set_dataset(dataset.log, dataset.metadata, dataset.overview)
+
+    @Slot(str)
+    def _on_shell_result(self, page_key: str) -> None:
+        if page_key != "exercise_117":
+            return
+        if self._state_mgr.has_result(page_key):
+            result = self._state_mgr.result(page_key)
+            self._populate_results(result)
+            self.analysis_completed.emit(result)
+        else:
+            self._clear_result_widgets()
+            if self._active_log is not None:
+                self._apply_state("ready", "Jalankan Analisis 11.7 dari dataset aktif.")
+
+    @Slot(str, str)
+    def _on_shell_failure(self, page_key: str, message: str) -> None:
+        if page_key == "exercise_117":
+            self._on_analysis_error(message)
+
+    @Slot(bool)
+    def _set_operations_available(self, available: bool) -> None:
+        self._operations_available = available
+        self._sync_controls()
 
     def set_dataset(
         self,
@@ -336,10 +385,7 @@ class Exercise117Page(QWidget):
 
         self._active_log = log_or_df
         self._active_metadata = metadata
-        self._last_result = None
-        self._evidence_rows = []
-        self._displayed_cases = []
-        self._table_model.set_cases([])
+        self._clear_result_widgets()
 
         if log_or_df is None:
             self._apply_state(
@@ -368,6 +414,14 @@ class Exercise117Page(QWidget):
     def run_analysis(self) -> None:
         """Launch analyze_117 in background thread."""
         if self._active_log is None or self._thread is not None:
+            return
+
+        if self._host_window is not None:
+            if self._host_window.run_task(
+                "exercise_117", "Analisis Exercise 11.7", lambda dataset: analyze_117(dataset.log)
+            ):
+                self._apply_state("loading", "Menghitung analisis Exercise 11.7 (A–E)...")
+                self.analysis_started.emit()
             return
 
         self._apply_state("loading", "Menghitung analisis Exercise 11.7 (A–E)...")
@@ -420,7 +474,7 @@ class Exercise117Page(QWidget):
                 sub_a.get("rule", RULE_117_A),
                 str(sub_a.get("count", total_cases)),
                 str(total_cases),
-                "100.0%",
+                "100.0%" if total_cases else "0.0%",
                 "-",
             ),
             (
@@ -429,7 +483,8 @@ class Exercise117Page(QWidget):
                 sub_b.get("rule", RULE_117_B),
                 str(sub_b.get("valid_duration_cases", total_cases)),
                 str(total_cases),
-                "100.0%",
+                f"{sub_b.get('valid_duration_cases', total_cases) / total_cases:.2%}"
+                if total_cases else "0.00%",
                 f"{mean_b:.4f}",
             ),
             (
@@ -465,6 +520,7 @@ class Exercise117Page(QWidget):
         for row_idx, row in enumerate(summary_rows):
             for col_idx, val in enumerate(row):
                 item = QTableWidgetItem(val)
+                item.setToolTip(val)
                 if col_idx in (0, 3, 4, 5, 6):
                     item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 self.summary_table.setItem(row_idx, col_idx, item)
@@ -495,18 +551,16 @@ class Exercise117Page(QWidget):
     @Slot()
     def reset_results(self) -> None:
         """Clear results and return to ready state."""
+        if self._host_window is not None:
+            self._host_window.reset_result("exercise_117")
+            return
         if self._thread is not None and self._thread.isRunning():
             self._thread.quit()
             self._thread.wait(2000)
             self._thread = None
             self._worker = None
 
-        self._last_result = None
-        self._evidence_rows = []
-        self._displayed_cases = []
-        self._table_model.set_cases([])
-        self.summary_table.setRowCount(0)
-        self.table_count_label.setText("0 case")
+        self._clear_result_widgets()
 
         if self._state_mgr is not None:
             self._state_mgr.clear_result("exercise_117")
@@ -515,6 +569,14 @@ class Exercise117Page(QWidget):
             self._apply_state("ready", "Hasil direset. Klik 'Jalankan Analisis 11.7' untuk menghitung kembali.")
         else:
             self._apply_state("no_dataset", "Dataset belum dimuat.")
+
+    def _clear_result_widgets(self) -> None:
+        self._last_result = None
+        self._evidence_rows = []
+        self._displayed_cases = []
+        self._table_model.set_cases([])
+        self.summary_table.setRowCount(0)
+        self.table_count_label.setText("0 case")
 
     def _filter_table(self) -> None:
         """Fast filter in Python memory, updating the virtual model in 0 ms."""
@@ -554,21 +616,27 @@ class Exercise117Page(QWidget):
     def _apply_state(self, state: str, message: str) -> None:
         self._state = state
         self.status_label.setText(message)
+        self._sync_controls()
+        self.state_changed.emit(state)
 
+    def _sync_controls(self) -> None:
         has_dataset = self._active_log is not None
-        running = state == "loading"
+        running = self._state == "loading"
+        ready = has_dataset and not running and self._operations_available
 
-        self.run_button.setEnabled(has_dataset and not running)
-        self.reset_button.setEnabled(has_dataset and not running)
-        self.export_csv_button.setEnabled(has_dataset and not running and self._last_result is not None)
+        self.run_button.setEnabled(ready)
+        self.reset_button.setEnabled(ready and self._last_result is not None)
+        self.export_csv_button.setEnabled(ready and self._last_result is not None)
         self.filter_input.setEnabled(not running and len(self._evidence_rows) > 0)
         self.category_combo.setEnabled(not running and len(self._evidence_rows) > 0)
         self._update_open_button_state()
-        self.state_changed.emit(state)
 
     def _quick_export_csv(self) -> None:
         """Direct export of 11.7 summary to CSV."""
         if self._last_result is None:
+            return
+        if self._host_window is not None:
+            self._host_window.navigate("export")
             return
         default_name = "bpic17_summary_exercise_117.csv"
         file_path, _ = QFileDialog.getSaveFileName(

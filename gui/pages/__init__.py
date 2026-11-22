@@ -27,8 +27,8 @@ def install_anggota4_pages(window: Any) -> tuple[Exercise1122Page, CaseExplorerP
     window.install_page("case_explorer", case_explorer_page)
 
     def _open_evidence(case_id: Any, evidence: Any) -> None:
-        case_explorer_page.open_case(case_id, evidence)
         window.navigate("case_explorer")
+        case_explorer_page.open_case(case_id, evidence)
 
     ex1122_page.open_case_requested.connect(_open_evidence)
     return ex1122_page, case_explorer_page

@@ -9,7 +9,7 @@ from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Any
 
-from PySide6.QtCore import QThread, QTimer, Qt, Slot
+from PySide6.QtCore import QThread, QTimer, Qt, Signal, Slot
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
     QFormLayout,
@@ -113,6 +113,9 @@ def _about() -> QWidget:
 
 class MainWindow(QMainWindow):
     """Host one import panel and coordinate tasks across feature pages."""
+
+    operations_available = Signal(bool)
+    task_failed = Signal(str, str)
 
     def __init__(self) -> None:
         super().__init__()
@@ -306,6 +309,7 @@ class MainWindow(QMainWindow):
             self.feedback.display("Dataset aktif berubah. Hasil proses sebelumnya diabaikan.")
         elif thread.error is not None:
             self.feedback.display(f"{task.description} gagal. {thread.error}", "error")
+            self.task_failed.emit(task.page_key, thread.error)
         else:
             self.state.save_result(dataset, task.page_key, thread.result)
             self.feedback.display(f"{task.description} selesai.", "success")
@@ -326,7 +330,8 @@ class MainWindow(QMainWindow):
 
     @Slot(object, object, object)
     def _dataset_loaded(self, log: Any, metadata: dict[str, Any], overview: dict[str, Any]) -> None:
-        self.state.activate(ActiveDataset(log, metadata, overview))
+        if not self._close_requested:
+            self.state.activate(ActiveDataset(log, metadata, overview))
         self._finish_import(f"{metadata['file_name']} siap digunakan.", "success")
 
     @Slot(object)
@@ -376,6 +381,7 @@ class MainWindow(QMainWindow):
                 reset=ready and self.state.has_result(key),
                 rerun=ready and key in self._last_tasks,
             )
+        self.operations_available.emit(ready)
 
     def _operation_finished(self) -> None:
         self._sync_controls()

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from PySide6.QtCore import QObject, QThread, Qt, Signal, Slot
+from PySide6.QtCore import QModelIndex, Qt, Signal, Slot
 from PySide6.QtGui import QBrush, QColor, QFont
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -28,31 +28,14 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from gui.widgets import DataTable
+from gui.workers import TaskThread
 from modules.case_explorer import (
     CaseIndex,
     build_case_index,
     get_case_detail,
     search_cases,
 )
-
-
-class CaseIndexWorker(QObject):
-    """Background worker that builds a ``CaseIndex`` off the UI thread."""
-
-    completed = Signal(object)
-    failed = Signal(str)
-
-    def __init__(self, log_or_df: Any) -> None:
-        super().__init__()
-        self._log_or_df = log_or_df
-
-    @Slot()
-    def run(self) -> None:
-        try:
-            index = build_case_index(self._log_or_df)
-            self.completed.emit(index)
-        except Exception as error:
-            self.failed.emit(str(error))
 
 
 class CaseExplorerPage(QWidget):
@@ -90,8 +73,7 @@ class CaseExplorerPage(QWidget):
         self._host_window: Any | None = None
         self._state: str = "no_dataset"
 
-        self._thread: QThread | None = None
-        self._worker: CaseIndexWorker | None = None
+        self._thread: TaskThread | None = None
         self._closing = False
 
         self._build_ui()
@@ -141,12 +123,11 @@ class CaseExplorerPage(QWidget):
         self.case_count_label = QLabel("Total case: 0")
         case_list_layout.addWidget(self.case_count_label)
 
-        self.case_table = QTableWidget(0, 4)
-        self.case_table.setHorizontalHeaderLabels(
-            ["Case ID", "Event", "Mulai", "Selesai"]
-        )
-        self._configure_table(self.case_table)
-        self.case_table.cellClicked.connect(self._on_case_row_clicked)
+        self.case_table = DataTable(["Case ID", "Event", "Mulai", "Selesai"])
+        for column, width in enumerate((155, 54, 184)):
+            self.case_table.setColumnWidth(column, width)
+        self.case_table.clicked.connect(self._on_case_clicked)
+        self.case_table.activated.connect(self._on_case_clicked)
         case_list_layout.addWidget(self.case_table)
         splitter.addWidget(case_list_box)
 
@@ -235,14 +216,6 @@ class CaseExplorerPage(QWidget):
             metadata = log_or_df.metadata
             log_or_df = log_or_df.log
 
-        if self.is_indexing():
-            self._pending_dataset = (
-                log_or_df,
-                metadata if isinstance(metadata, dict) else None,
-            )
-            self._apply_state("loading", "Sedang mengindeks dataset sebelumnya; dataset baru antri...")
-            return
-
         self._active_log = log_or_df
         self._active_metadata = metadata if isinstance(metadata, dict) else None
         self._case_index = None
@@ -252,10 +225,15 @@ class CaseExplorerPage(QWidget):
         self._pending_open = None
 
         self.search_input.clear()
-        self.case_table.setRowCount(0)
+        self.case_table.set_rows(())
         self.event_table.setRowCount(0)
         self.case_count_label.setText("Total case: 0")
         self.case_header_label.setText("Belum ada case dipilih.")
+
+        if self.is_indexing():
+            self._pending_dataset = (log_or_df, self._active_metadata)
+            self._apply_state("loading", "Menunggu indeks dataset baru...")
+            return
 
         if log_or_df is None:
             self._apply_state("no_dataset", "Dataset belum dimuat.")
@@ -263,27 +241,14 @@ class CaseExplorerPage(QWidget):
 
         self._apply_state("loading", "Membangun indeks case untuk Case Explorer...")
 
-        thread = QThread(self)
-        worker = CaseIndexWorker(log_or_df)
-        worker.moveToThread(thread)
-        thread.started.connect(worker.run)
-        worker.completed.connect(self._on_index_completed)
-        worker.failed.connect(self._on_index_failed)
-        worker.completed.connect(thread.quit)
-        worker.failed.connect(thread.quit)
-        thread.finished.connect(worker.deleteLater)
-        thread.finished.connect(self._on_thread_finished)
-        thread.finished.connect(thread.deleteLater)
-
+        thread = TaskThread(lambda: build_case_index(log_or_df), "Indeks Case Explorer", self)
+        thread.finished.connect(self._on_thread_finished, Qt.ConnectionType.QueuedConnection)
         self._thread = thread
-        self._worker = worker
         thread.start()
 
     @Slot(object)
     def _on_index_completed(self, index: CaseIndex) -> None:
         if self._closing:
-            return
-        if self._pending_dataset is not None:
             return
 
         self._case_index = index
@@ -308,8 +273,6 @@ class CaseExplorerPage(QWidget):
     def _on_index_failed(self, message: str) -> None:
         if self._closing:
             return
-        if self._pending_dataset is not None:
-            return
 
         self._case_index = None
         self._pending_open = None
@@ -318,32 +281,28 @@ class CaseExplorerPage(QWidget):
 
     @Slot()
     def _on_thread_finished(self) -> None:
-        if self.sender() is self._thread or self._thread is None:
-            self._thread = None
-            self._worker = None
-            if self._pending_dataset is not None and not self._closing:
-                log_or_df, metadata = self._pending_dataset
-                self._pending_dataset = None
-                self.set_dataset(log_or_df, metadata)
+        thread = self._thread
+        self._thread = None
+        if thread is None:
+            return
+        thread.deleteLater()
+        if self._closing:
+            return
+        if self._pending_dataset is not None:
+            log_or_df, metadata = self._pending_dataset
+            pending_open = self._pending_open
+            self._pending_dataset = None
+            self.set_dataset(log_or_df, metadata)
+            self._pending_open = pending_open
+        elif thread.error is not None:
+            self._on_index_failed(thread.error)
+        else:
+            self._on_index_completed(thread.result)
 
     @Slot()
     def clear_dataset(self) -> None:
-        """Detach active dataset and reset Case Explorer to no_dataset state."""
-
-        self._active_log = None
-        self._active_metadata = None
-        self._case_index = None
-        self._visible_cases = []
-        self._current_case_id = None
-        self._current_evidence = None
-        self._pending_open = None
-        self._pending_dataset = None
-        self.search_input.clear()
-        self.case_table.setRowCount(0)
-        self.event_table.setRowCount(0)
-        self.case_count_label.setText("Total case: 0")
-        self.case_header_label.setText("Belum ada case dipilih.")
-        self._apply_state("no_dataset", "Dataset belum dimuat.")
+        """Detach the active dataset and clear the case view."""
+        self.set_dataset(None)
 
     @Slot()
     def reset_view(self) -> None:
@@ -386,6 +345,7 @@ class CaseExplorerPage(QWidget):
 
         if not matches:
             self._current_case_id = None
+            self._current_evidence = None
             self.event_table.setRowCount(0)
             self.case_header_label.setText(f"Case '{query}' tidak ditemukan.")
             self._apply_state("empty", f"Tidak ditemukan case untuk kata kunci '{query}'.")
@@ -397,6 +357,10 @@ class CaseExplorerPage(QWidget):
         elif len(matches) == 1:
             self.open_case(matches[0]["case_id"], evidence=None)
         else:
+            self._current_case_id = None
+            self._current_evidence = None
+            self.event_table.setRowCount(0)
+            self.case_header_label.setText("Pilih case dari hasil pencarian.")
             self._apply_state(
                 "ready",
                 f"Ditemukan {len(matches)} case yang cocok dengan '{query}'. Pilih baris untuk melihat detail.",
@@ -464,26 +428,18 @@ class CaseExplorerPage(QWidget):
 
     def _populate_case_table(self, summaries: list[dict[str, Any]]) -> None:
         self.case_count_label.setText(f"Total case tampil: {len(summaries)}")
-        self.case_table.setRowCount(len(summaries))
-        for row_idx, summary in enumerate(summaries):
-            values = (
-                summary.get("case_id"),
-                summary.get("event_count"),
-                summary.get("start_timestamp"),
-                summary.get("end_timestamp"),
-            )
-            for col_idx, val in enumerate(values):
-                text = "-" if val is None else str(val)
-                self.case_table.setItem(row_idx, col_idx, QTableWidgetItem(text))
+        columns = ("case_id", "event_count", "start_timestamp", "end_timestamp")
+        self.case_table.set_rows([
+            tuple(summary.get(column) for column in columns) for summary in summaries
+        ])
 
     def _select_case_in_list(self, case_id: Any) -> None:
-        target = str(case_id)
-        for row_idx in range(self.case_table.rowCount()):
-            item = self.case_table.item(row_idx, 0)
-            if item is not None and item.text() == target:
-                self.case_table.selectRow(row_idx)
-                self.case_table.scrollToItem(
-                    item, QAbstractItemView.ScrollHint.PositionAtCenter
+        for row, summary in enumerate(self._visible_cases):
+            if summary["case_id"] == case_id:
+                self.case_table.selectRow(row)
+                self.case_table.scrollTo(
+                    self.case_table.model().index(row, 0),
+                    QAbstractItemView.ScrollHint.PositionAtCenter,
                 )
                 return
 
@@ -518,6 +474,7 @@ class CaseExplorerPage(QWidget):
             for col_idx, val in enumerate(values):
                 text = "-" if val is None else str(val)
                 item = QTableWidgetItem(text)
+                item.setToolTip(text)
                 if is_evidence:
                     item.setBackground(bg_brush)
                     item.setForeground(fg_brush)
@@ -531,8 +488,9 @@ class CaseExplorerPage(QWidget):
                     first_item, QAbstractItemView.ScrollHint.PositionAtCenter
                 )
 
-    @Slot(int, int)
-    def _on_case_row_clicked(self, row: int, _col: int) -> None:
+    @Slot(QModelIndex)
+    def _on_case_clicked(self, index: QModelIndex) -> None:
+        row = index.row()
         if 0 <= row < len(self._visible_cases):
             case_id = self._visible_cases[row]["case_id"]
             evidence = (
@@ -544,12 +502,8 @@ class CaseExplorerPage(QWidget):
     def _wait_for_thread(self) -> None:
         self._closing = True
         thread = self._thread
-        if thread is not None and thread.isRunning():
-            thread.requestInterruption()
-            thread.quit()
+        if thread is not None:
             thread.wait()
-        self._thread = None
-        self._worker = None
 
     def closeEvent(self, event) -> None:  # noqa: N802 - Qt API name
         """Wait cleanly for any active indexing thread before closing."""

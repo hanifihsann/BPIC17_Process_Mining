@@ -7,10 +7,11 @@ overview calculation run in a QThread so the host GUI remains responsive.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from PySide6.QtCore import QObject, QThread, Qt, Signal, Slot
+from PySide6.QtCore import Qt, Signal, Slot
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QFileDialog,
@@ -29,45 +30,26 @@ from PySide6.QtWidgets import (
     QHeaderView,
 )
 
+from gui.widgets import DataTable
+from gui.workers import TaskThread
 from modules.data_loader import load_xes, validate_log
 from modules.overview import calculate_overview
 
 
-class ImportOverviewWorker(QObject):
-    """Background worker for one complete import and overview operation."""
-
-    progress = Signal(str)
-    completed = Signal(object, object, object)
-    validation_failed = Signal(object, object, object)
-    failed = Signal(str)
-
-    def __init__(self, file_path: str) -> None:
-        super().__init__()
-        self.file_path = file_path
-
-    @Slot()
-    def run(self) -> None:
-        try:
-            self.progress.emit("Membaca file XES dengan PM4Py...")
-            log, metadata = load_xes(self.file_path)
-
-            # load_xes already validates the same in-memory log. The fallback
-            # keeps this worker robust if a compatible loader omits metadata.
-            validation = metadata.get("validation")
-            if validation is None:
-                self.progress.emit("Memvalidasi atribut event log...")
-                validation = validate_log(log)
-                metadata["validation"] = validation
-
-            overview = None
-            if validation.get("valid", False):
-                self.progress.emit("Menghitung overview dan durasi case...")
-                overview = calculate_overview(log, metadata)
-                self.completed.emit(log, metadata, overview)
-            else:
-                self.validation_failed.emit(log, metadata, validation)
-        except Exception as error:
-            self.failed.emit(str(error))
+def _load_overview(
+    file_path: str, report: Callable[[str], None]
+) -> tuple[Any, dict[str, Any], dict[str, Any] | None]:
+    report("Membaca file XES dengan PM4Py...")
+    log, metadata = load_xes(file_path)
+    validation = metadata.get("validation")
+    if validation is None:
+        report("Memvalidasi atribut event log...")
+        validation = validate_log(log)
+        metadata["validation"] = validation
+    if not validation["valid"]:
+        return log, metadata, None
+    report("Menghitung overview dan durasi case...")
+    return log, metadata, calculate_overview(log, metadata)
 
 
 class ImportOverviewPage(QWidget):
@@ -95,18 +77,20 @@ class ImportOverviewPage(QWidget):
     load_failed = Signal(str)
     status_changed = Signal(str)
     load_started = Signal(str)
+    _progress = Signal(str)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.active_log: Any | None = None
         self.active_metadata: dict[str, Any] | None = None
         self.active_overview: dict[str, Any] | None = None
-        self._thread: QThread | None = None
-        self._worker: ImportOverviewWorker | None = None
+        self._thread: TaskThread | None = None
+        self._case_rows: list[tuple[Any, ...]] = []
         self._pending_file_path: str | None = None
         self._closing = False
 
         self._build_ui()
+        self._progress.connect(self._set_status, Qt.ConnectionType.QueuedConnection)
 
     def _build_ui(self) -> None:
         self.setObjectName("importOverviewPage")
@@ -142,6 +126,10 @@ class ImportOverviewPage(QWidget):
         validation_layout.addRow("Timestamp (time:timestamp):", self.timestamp_label)
         validation_layout.addRow("Lifecycle:", self.lifecycle_label)
         validation_layout.addRow("Resource:", self.resource_label)
+        self.attributes_label = QLabel("-")
+        self.attributes_label.setTextFormat(Qt.TextFormat.PlainText)
+        self.attributes_label.setWordWrap(True)
+        validation_layout.addRow("Atribut event dan trace:", self.attributes_label)
         root.addWidget(validation_box)
 
         overview_box = QGroupBox("Overview")
@@ -177,11 +165,9 @@ class ImportOverviewPage(QWidget):
         self.case_search.textChanged.connect(self._filter_case_table)
         search_layout.addWidget(self.case_search)
         duration_layout.addLayout(search_layout)
-        self.case_table = QTableWidget(0, 5)
-        self.case_table.setHorizontalHeaderLabels(
-            ["Case ID", "Mulai", "Selesai", "Durasi", "Durasi (hari)"]
-        )
-        self._configure_table(self.case_table)
+        self.case_table = DataTable(["Case ID", "Mulai", "Selesai", "Durasi", "Durasi (hari)"])
+        for column, width in enumerate((160, 200, 200, 150)):
+            self.case_table.setColumnWidth(column, width)
         duration_layout.addWidget(self.case_table)
         root.addWidget(duration_box, 1)
 
@@ -214,7 +200,7 @@ class ImportOverviewPage(QWidget):
     def load_file(self, file_path: str) -> None:
         """Start a background import for ``file_path``."""
 
-        if self._thread is not None and self._thread.isRunning():
+        if self._thread is not None:
             self._set_status("Proses sebelumnya masih berjalan.")
             return
 
@@ -224,27 +210,14 @@ class ImportOverviewPage(QWidget):
         self._set_status(f"Menyiapkan import: {path}")
         self.load_started.emit(path)
 
-        thread = QThread(self)
-        worker = ImportOverviewWorker(path)
-        worker.moveToThread(thread)
-        thread.started.connect(worker.run)
-        worker.progress.connect(self._set_status)
-        worker.completed.connect(self._on_worker_completed)
-        worker.validation_failed.connect(self._on_worker_validation_failed)
-        worker.failed.connect(self._on_worker_failed)
-        worker.completed.connect(thread.quit)
-        worker.validation_failed.connect(thread.quit)
-        worker.failed.connect(thread.quit)
-        thread.finished.connect(worker.deleteLater)
-        thread.finished.connect(self._on_thread_finished)
-        # Keep this connection after the page cleanup callback so references
-        # are cleared before the QThread QObject is scheduled for deletion.
-        thread.finished.connect(thread.deleteLater)
-
+        thread = TaskThread(
+            lambda: _load_overview(path, self._progress.emit), "Impor XES", self
+        )
+        thread.finished.connect(self._on_thread_finished, Qt.ConnectionType.QueuedConnection)
         self._thread = thread
-        self._worker = worker
         thread.start()
 
+    @Slot(str)
     def _set_status(self, message: str) -> None:
         self.status_label.setText(message)
         self.status_changed.emit(message)
@@ -301,23 +274,26 @@ class ImportOverviewPage(QWidget):
 
     @Slot()
     def _on_thread_finished(self) -> None:
+        thread = self._thread
         self._thread = None
-        self._worker = None
+        if thread is None:
+            return
+        thread.deleteLater()
+        if self._closing:
+            return
+        if thread.error is not None:
+            self._on_worker_failed(thread.error)
+        else:
+            log, metadata, overview = thread.result
+            if overview is None:
+                self._on_worker_validation_failed(log, metadata, metadata["validation"])
+            else:
+                self._on_worker_completed(log, metadata, overview)
 
     def closeEvent(self, event) -> None:  # noqa: N802 - Qt API name
-        """Stop accepting worker callbacks before the page is destroyed."""
-
         self._closing = True
-        thread = self._thread
-        if thread is not None and thread.isRunning():
-            # PM4Py's read_xes call is not cancellable through this worker.
-            # Waiting here prevents QThread from being destroyed while it is
-            # still running when the host window closes.
-            thread.requestInterruption()
-            thread.quit()
-            thread.wait()
-        self._thread = None
-        self._worker = None
+        if self._thread is not None:
+            self._thread.wait()
         super().closeEvent(event)
 
     def _clear_results(self) -> None:
@@ -333,10 +309,12 @@ class ImportOverviewPage(QWidget):
             self.timestamp_label,
             self.lifecycle_label,
             self.resource_label,
+            self.attributes_label,
         ):
             label.setText("-")
         self.activity_table.setRowCount(0)
-        self.case_table.setRowCount(0)
+        self._case_rows = []
+        self.case_table.set_rows(())
         self.message_box.clear()
 
     def _render_validation(self, metadata: dict[str, Any]) -> None:
@@ -380,6 +358,10 @@ class ImportOverviewPage(QWidget):
             "Tersedia" if optional.get("org:resource", False) else "Tidak tersedia"
         )
 
+        trace = ", ".join(metadata.get("available_trace_attributes", []))
+        events = ", ".join(metadata.get("available_event_attributes", []))
+        self.attributes_label.setText(f"Trace: {trace or '-'}\nEvent: {events or '-'}")
+
     @staticmethod
     def _required_status(name: str, issue_count: int, missing_attribute: bool) -> str:
         if missing_attribute:
@@ -407,29 +389,21 @@ class ImportOverviewPage(QWidget):
             self.activity_table.setItem(row, 0, QTableWidgetItem(str(activity)))
             self.activity_table.setItem(row, 1, QTableWidgetItem(str(count)))
 
-        durations = overview.get("case_durations", [])
-        self.case_table.setRowCount(len(durations))
-        for row, record in enumerate(durations):
-            values = (
-                record.get("case_id"),
-                record.get("start_timestamp"),
-                record.get("end_timestamp"),
-                record.get("duration"),
-                record.get("duration_days"),
+        self._case_rows = [
+            (
+                record["case_id"], record["start_timestamp"], record["end_timestamp"],
+                record["duration"], f"{record['duration_days']:.6f}",
             )
-            for column, value in enumerate(values):
-                if column == 4 and isinstance(value, (int, float)):
-                    text = f"{value:.6f}"
-                else:
-                    text = "" if value is None else str(value)
-                self.case_table.setItem(row, column, QTableWidgetItem(text))
+            for record in overview["case_durations"]
+        ]
+        self._filter_case_table(self.case_search.text())
 
     def _filter_case_table(self, text: str) -> None:
         query = text.casefold().strip()
-        for row in range(self.case_table.rowCount()):
-            item = self.case_table.item(row, 0)
-            case_id = item.text().casefold() if item else ""
-            self.case_table.setRowHidden(row, query not in case_id)
+        rows = self._case_rows
+        if query:
+            rows = [row for row in rows if query in str(row[0]).casefold()]
+        self.case_table.set_rows(rows)
 
     def _append_messages(self, messages: list[str]) -> None:
         if not messages:
