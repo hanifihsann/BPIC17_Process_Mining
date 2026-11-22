@@ -15,6 +15,15 @@ def setup_feature_pages(window: MainWindow) -> None:
     """Mount completed feature pages onto MainWindow."""
     from gui.pages.exercise_117_page import Exercise117Page
     from gui.pages.export_page import ExportPage
+    from gui.pages.exercise_115_118_page import Exercise115118Page
+
+    # Hasta: Exercises 11.15 and 11.18
+    ex115118_page = Exercise115118Page()
+    window.install_page(
+        "exercise_115_118",
+        ex115118_page,
+        ex115118_page.bind_main_window(window),
+    )
 
     # Member 2: Exercise 11.7
     ex117_page = Exercise117Page(state=window.state)
@@ -42,6 +51,7 @@ def setup_feature_pages(window: MainWindow) -> None:
             window.navigate("case_explorer")
 
         ex117_page.open_case_requested.connect(open_in_ce)
+        ex115118_page.open_case_requested.connect(open_in_ce)
     except Exception as exc:
         logging.getLogger(__name__).warning("Modul halaman tambahan belum siap: %s", exc)
 

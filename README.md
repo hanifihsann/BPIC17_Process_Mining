@@ -23,7 +23,7 @@ py -3.13 -m venv .venv
 |---|---|---|
 | Import Dataset dan Overview | Anggota 1 | Panel asli terhubung ke shell. |
 | Exercise 11.7 dan Export Results | Anggota 2 | Placeholder sampai panel analisis dan ekspor CSV siap. |
-| Exercise 11.15 & 11.18 | Anggota 3 | Placeholder sampai panel analisis siap. |
+| Exercise 11.15 & 11.18 | Anggota 3 | Analisis repeated complete dan same-resource terpasang; evidence dapat dibuka di Case Explorer. |
 | Exercise 11.22 dan Case Explorer | Anggota 4 | Placeholder sampai panel analisis dan trace case siap. |
 | Shell, worker, dataset aktif, About, dan komponen bersama | Anggota 5 | Tersedia. Run, Reset, dan Re-run diuji dengan panel fixture. |
 
